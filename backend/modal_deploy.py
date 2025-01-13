@@ -1,40 +1,47 @@
+# backend/modal_deploy.py
 import modal
 import asyncio
 import sys
 
-# Initialize the Modal App
 app = modal.App()
 
-# Define an image with necessary dependencies and mount the current directory
 my_image = (
     modal.Image.debian_slim().pip_install([
         "gym",
         "numpy",
         "beautifulsoup4",
-        "requests"
-        # Add any additional dependencies here
+        "requests",
+        "arcgis",
+        "Flask",
+        "python-dotenv"
     ])
     .add_local_dir(".", remote_path="/root/project")
 )
 
 @app.function(image=my_image)
 def run_simulation():
-    # Add the mounted directory to sys.path to import simulation module
     sys.path.append("/root/project")
-    from simulation import FireMitigationEnv  # Now accessible due to mount and sys.path adjustment
-    
+    from simulation import FireMitigationEnv
     env = FireMitigationEnv()
     obs = env.reset()
     action = env.action_space.sample()
-    new_state, reward, done, info = env.step(action)
-    print(f"Action: {action}, Reward: {reward}")
-    return new_state.tolist(), reward  # Convert numpy array to list for JSON serialization
+    state, reward, done, info = env.step(action)
+    # Returning a structured result for the frontend
+    return {
+        "stations": env.fire_stations,
+        "hydrants": env.hydrants[:10],  # Limit to first 10 for demo
+        "wildfires": env.wildfires[:5],  # Limit to first 5 for demo
+        "route": [
+            {"lat": station["latitude"], "lng": station["longitude"]}
+            for station in env.fire_stations
+        ]
+    }
 
 async def main():
     async with app.run():
-        # Call the function without await, as remote() returns a tuple directly in this context
-        result = run_simulation.remote()
+        result = await run_simulation.remote()
         print("Simulation result:", result)
+        return result
 
 if __name__ == "__main__":
     asyncio.run(main())

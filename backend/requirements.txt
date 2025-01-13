@@ -2,4 +2,7 @@ beautifulsoup4
 requests
 gym
 numpy
-modal  
+modal
+arcgis
+Flask
+python-dotenv
