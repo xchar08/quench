@@ -8,46 +8,54 @@ import OpenAI from 'openai';
 import hydrantpng from '../assets/firehydrant.png';
 
 const FireStationsMap = () => {
+  // ----------------------------------------------------------------
   // States and refs
+  // ----------------------------------------------------------------
   const [fireStations, setFireStations] = useState([]);
   const [shelters, setShelters] = useState([]);
   const [hydrants, setHydrants] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [map, setMap] = useState(null);
   const [fireLocations, setFireLocations] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
-  const alertsRef = useRef(null);
+
+  const [loading, setLoading] = useState(true);
+  const [map, setMap] = useState(null);
   const [pathPolyline, setPathPolyline] = useState(null);
   const [model, setModel] = useState(null);
 
+  // Refs for markers & overlays
   const fireMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
-  const heatmapRef = useRef(null);
   const hydrantMarkersRef = useRef([]);
+  const heatmapRef = useRef(null);
+  const alertsRef = useRef([]); // to store weather alert polygons
   const geocoderRef = useRef(null);
 
-  // API Keys from environment variables
+  // -------------- NEW TOGGLE STATES --------------
+  const [showFireStations, setShowFireStations] = useState(true);
+  const [showShelters, setShowShelters] = useState(true);
+  const [showHydrants, setShowHydrants] = useState(true);
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [showWeatherAlerts, setShowWeatherAlerts] = useState(true);
+  // -----------------------------------------------
+
+  // Environment / API Keys
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
-  const californiaBounds = {
-    north: 42.0095,
-    south: 32.5343,
-    west: -124.4096,
-    east: -114.1315
-  };
   const GRAPH_HOPPER_API_KEY = import.meta.env.VITE_GRAPH_HOPPER_API_KEY;
   const TF_MODEL_URL = import.meta.env.VITE_TF_MODEL_URL;
   const NEBIUS_API_KEY = import.meta.env.VITE_NEBIUS_API_KEY;
 
-  // Initialize Nebius AI client with browser allowance (for testing only)
+  // Initialize Nebius AI client
   const nebiusClient = new OpenAI({
     baseURL: 'https://api.studio.nebius.ai/v1/',
     apiKey: NEBIUS_API_KEY,
-    dangerouslyAllowBrowser: true,  // WARNING: Exposes API key in browser
+    dangerouslyAllowBrowser: true, // WARNING: Exposes key in browser
   });
 
-  // CSV parsing
+  // ----------------------------------------------------------------
+  // CSV parsing (NASA fires)
+  // ----------------------------------------------------------------
   const csvToJson = (csv) => {
     const results = Papa.parse(csv, {
       header: true,
@@ -64,21 +72,19 @@ const FireStationsMap = () => {
     return locations;
   };
 
-  // fetch nws danger zones data
+  // ----------------------------------------------------------------
+  // 1) Fetch Weather Alerts (NWS)
+  // ----------------------------------------------------------------
   useEffect(() => {
     const fetchWeatherAlerts = async () => {
       try {
         setAlertsLoading(true);
-
-        // Make API request to get weather alerts based on latitude and longitude
-
         const response = await axios.get('https://api.weather.gov/alerts/active?area=CA');
         const filteredAlerts = response.data.features.filter((alert) => {
           const severity = alert.properties.severity;
-          // Check if the severity is a red flag warning or equivalent
-          return severity === 'Severe'; // You can also check other fields depending on the API response
+          // Example filter for "Severe" only
+          return severity === 'Severe';
         });
-        // Set the alerts state with the response data
         setAlerts(filteredAlerts);
         setAlertsLoading(false);
       } catch (error) {
@@ -90,6 +96,7 @@ const FireStationsMap = () => {
     fetchWeatherAlerts();
   }, []);
 
+  // Helper to pick a color for each alert severity
   const getAlertColor = (severity) => {
     switch (severity) {
       case 'Severe':
@@ -105,8 +112,9 @@ const FireStationsMap = () => {
     }
   };
 
-  // Fetch Fire Stations Data
-  // Data fetching
+  // ----------------------------------------------------------------
+  // 2) Fetch Fire Stations
+  // ----------------------------------------------------------------
   useEffect(() => {
     const fetchFireStations = async () => {
       try {
@@ -119,6 +127,9 @@ const FireStationsMap = () => {
     fetchFireStations();
   }, []);
 
+  // ----------------------------------------------------------------
+  // 3) Fetch Shelters
+  // ----------------------------------------------------------------
   useEffect(() => {
     const fetchShelters = async () => {
       try {
@@ -131,6 +142,9 @@ const FireStationsMap = () => {
     fetchShelters();
   }, []);
 
+  // ----------------------------------------------------------------
+  // 4) Fetch NASA Fire Data (CSV)
+  // ----------------------------------------------------------------
   useEffect(() => {
     const fetchFireData = async () => {
       try {
@@ -147,15 +161,15 @@ const FireStationsMap = () => {
     fetchFireData();
   }, []);
 
+  // ----------------------------------------------------------------
+  // 5) Fetch Hydrants (from /public/data/Hydrants.json)
+  // ----------------------------------------------------------------
   useEffect(() => {
     const fetchHydrants = async () => {
       try {
-        // The file is in public/data/Hydrants.json
-        // So we can fetch it from /data/Hydrants.json
         const response = await fetch('/data/Hydrants.json');
         const jsonData = await response.json();
 
-        // The hydrant geometry is in jsonData.features[i].geometry.x, .y
         if (jsonData && jsonData.features) {
           const hydrantArr = jsonData.features.map((feat) => ({
             objectId: feat.attributes?.OBJECTID,
@@ -164,7 +178,6 @@ const FireStationsMap = () => {
             mainSize: feat.attributes?.MAIN_SIZE,
             tooltip: feat.attributes?.TOOLTIP,
             url: feat.attributes?.NLA_URL,
-            // geometry
             latitude: feat.geometry?.y,
             longitude: feat.geometry?.x,
           }));
@@ -177,7 +190,9 @@ const FireStationsMap = () => {
     fetchHydrants();
   }, []);
 
-  // Train a dummy TensorFlow.js model (placeholder)
+  // ----------------------------------------------------------------
+  // 6) Train Dummy TensorFlow Model
+  // ----------------------------------------------------------------
   useEffect(() => {
     const trainDummyModel = async () => {
       try {
@@ -185,6 +200,7 @@ const FireStationsMap = () => {
         dummyModel.add(tf.layers.dense({units: 10, inputShape: [3], activation: 'relu'}));
         dummyModel.add(tf.layers.dense({units: 3, activation: 'softmax'}));
         dummyModel.compile({optimizer: 'adam', loss: 'categoricalCrossentropy'});
+
         const xs = tf.randomNormal([100, 3]);
         const ys = tf.randomUniform([100, 3]);
         await dummyModel.fit(xs, ys, {epochs: 5});
@@ -197,7 +213,9 @@ const FireStationsMap = () => {
     trainDummyModel();
   }, []);
 
-  // Initialize Google Maps
+  // ----------------------------------------------------------------
+  // 7) Initialize Google Map
+  // ----------------------------------------------------------------
   useEffect(() => {
     if (!googleMapsApiKey) {
       console.error('Google Maps API key is missing.');
@@ -211,33 +229,42 @@ const FireStationsMap = () => {
       mapId: mapId || undefined,
     });
     let isMounted = true;
-    loader.load().then((google) => {
-      if (isMounted) {
-        const center = { lat: 34.0522, lng: -118.2437 };
-        const mapElement = document.getElementById('map');
-        const newMap = new google.maps.Map(mapElement, {
-          center,
-          zoom: 10,
-          mapId: mapId || undefined,
-        });
-        setMap(newMap);
+    loader
+      .load()
+      .then((google) => {
+        if (isMounted) {
+          const center = { lat: 34.0522, lng: -118.2437 };
+          const mapElement = document.getElementById('map');
+          const newMap = new google.maps.Map(mapElement, {
+            center,
+            zoom: 10,
+            mapId: mapId || undefined,
+          });
+          setMap(newMap);
+          setLoading(false);
+        }
+      })
+      .catch((e) => {
+        console.error('Error loading Google Maps:', e);
         setLoading(false);
-      }
-    }).catch((e) => {
-      console.error('Error loading Google Maps:', e);
-      setLoading(false);
-    });
-    return () => { isMounted = false; };
+      });
+    return () => {
+      isMounted = false;
+    };
   }, [googleMapsApiKey, mapId]);
 
-  // Initialize geocoder
+  // ----------------------------------------------------------------
+  // 8) Initialize Geocoder
+  // ----------------------------------------------------------------
   useEffect(() => {
     if (map && window.google) {
       geocoderRef.current = new window.google.maps.Geocoder();
     }
   }, [map]);
 
-  // Helper to create marker content
+  // ----------------------------------------------------------------
+  // Helper: createMarkerContent (colored circle)
+  // ----------------------------------------------------------------
   const createMarkerContent = (color) => {
     const div = document.createElement('div');
     div.style.backgroundColor = color;
@@ -248,38 +275,39 @@ const FireStationsMap = () => {
     return div;
   };
 
- // Render alerts on the map after fetching them
- useEffect(() => {
-  if (map && !alertsLoading && alerts.length > 0) {
-    // Clear previous alert markers
-    // alertsRef.current.forEach(marker => marker.setMap(null));
-    // if (alertsRef.current && Array.isArray(alertsRef.current)) {
-    //   alertsRef.current.forEach(marker => marker.setMap(null));
-    //   alertsRef.current = []; // Reset the array to avoid re-adding markers
-    // }
-    // GEOMETRIES ARE ALL NULL....
-    alerts.forEach((alert) => {
-      const { geometry, properties } = alert;
-      const affectedZones = properties.affectedZones;
+  // ----------------------------------------------------------------
+  // 9) Weather Alerts (Polygons)
+  // ----------------------------------------------------------------
+  useEffect(() => {
+    // Clear any existing polygons
+    alertsRef.current.forEach((poly) => poly.setMap(null));
+    alertsRef.current = [];
 
+    // If not showing alerts or still loading, skip
+    if (!map || alertsLoading || !showWeatherAlerts) return;
+    if (alerts.length === 0) return;
+
+    // Otherwise, draw polygons
+    alerts.forEach((alert) => {
+      const { properties } = alert;
+      const severity = properties.severity;
+      const alertColor = getAlertColor(severity);
+
+      const affectedZones = properties.affectedZones;
       if (affectedZones && affectedZones.length > 0) {
         affectedZones.forEach(async (zoneUrl) => {
-          // Fetch zone information (i.e., geometry and coordinates)
           try {
             const zoneResponse = await axios.get(zoneUrl);
             const zoneData = zoneResponse.data;
             const zoneGeometry = zoneData.geometry;
 
             if (zoneGeometry && zoneGeometry.type === 'Polygon' && zoneGeometry.coordinates) {
-              const polygonPath = zoneGeometry.coordinates[0].map(coord => ({
+              const polygonPath = zoneGeometry.coordinates[0].map((coord) => ({
                 lat: coord[1],
-                lng: coord[0]
+                lng: coord[0],
               }));
 
-              // Create a polygon for the alert zone
-              const alertColor = getAlertColor(properties.severity);
-              
-              const polygon = new google.maps.Polygon({
+              const polygon = new window.google.maps.Polygon({
                 paths: polygonPath,
                 strokeColor: alertColor,
                 strokeOpacity: 0.1,
@@ -288,34 +316,20 @@ const FireStationsMap = () => {
                 fillOpacity: 0.1,
                 map,
               });
-              
-              const infoWindow = new google.maps.InfoWindow({
-                content: `
-                  <div style="padding: 5px; font-family: Arial, sans-serif;">
-                    
-                    <p>Red Flag Warning - WildFire Alert Zone ${zoneUrl}</p>
-                  </div>
-                `,
-              });
-      
-              // google.maps.event.addListener(polygon, 'click', () => {
-              //   console.log("clicked")
-                // infoWindow.setPosition(polygon.getBounds().getCenter());
-              //   infoWindow.open(map, polygon);
-              // });
-              // const infoWindow = new google.maps.InfoWindow();
 
-              // Add a click event listener to the polygon
-              google.maps.event.addListener(polygon, 'click', function(event) {
-                console.log('Polygon clicked at:', event.latLng); // log the click position
-              
+              const infoWindow = new window.google.maps.InfoWindow({
+                content: `<div style="padding: 5px;">
+                  <strong>Red Flag Warning / WildFire Alert</strong><br />
+                  Severity: ${severity}
+                </div>`,
+              });
+
+              polygon.addListener('click', (event) => {
                 // Position the info window at the clicked location
                 infoWindow.setPosition(event.latLng);
-            
-                // infoWindow.setContent('You clicked on the polygon!');
                 infoWindow.open(map);
               });
-              
+
               alertsRef.current.push(polygon);
             }
           } catch (error) {
@@ -324,75 +338,95 @@ const FireStationsMap = () => {
         });
       }
     });
-  }
-}, [map, alerts, alertsLoading]);
+  }, [map, alerts, alertsLoading, showWeatherAlerts]);
 
-
-
-  // Add Fire Station Markers to the Map (red)
-  // Add Fire Station markers (red)
+  // ----------------------------------------------------------------
+  // 10) Fire Station Markers (red)
+  // ----------------------------------------------------------------
   useEffect(() => {
-    if (map && fireStations.length > 0 && window.google) {
-      fireMarkersRef.current.forEach(marker => marker.setMap(null));
-      fireMarkersRef.current = [];
-      fireStations.forEach(station => {
-        const { the_geom, shp_addr, address } = station;
-        if (!the_geom || !the_geom.coordinates) return;
-        const [lng, lat] = the_geom.coordinates;
-        const latNum = parseFloat(lat), lngNum = parseFloat(lng);
-        const markerElement = createMarkerContent('red');
-        const marker = new window.google.maps.marker.AdvancedMarkerElement({
-          map,
-          position: { lat: latNum, lng: lngNum },
-          title: shp_addr,
-          content: markerElement,
-        });
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `<div style="padding: 10px;"><h2>${shp_addr}</h2><p>${address}</p></div>`,
-        });
-        window.google.maps.event.addListener(marker, 'click', () => {
-          infoWindow.open(map, marker);
-        });
-        fireMarkersRef.current.push(marker);
-      });
-    }
-  }, [map, fireStations]);
+    // Clear existing markers
+    fireMarkersRef.current.forEach(marker => marker.setMap(null));
+    fireMarkersRef.current = [];
 
-  // Add Shelter markers (blue)
+    // If not showing or missing data, skip
+    if (!map || !showFireStations || fireStations.length === 0 || !window.google) {
+      return;
+    }
+
+    // Otherwise, create new markers
+    fireStations.forEach((station) => {
+      const { the_geom, shp_addr, address } = station;
+      if (!the_geom || !the_geom.coordinates) return;
+      const [lng, lat] = the_geom.coordinates;
+      const latNum = parseFloat(lat);
+      const lngNum = parseFloat(lng);
+      if (isNaN(latNum) || isNaN(lngNum)) return;
+
+      const markerElement = createMarkerContent('red');
+      const marker = new window.google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: { lat: latNum, lng: lngNum },
+        title: shp_addr,
+        content: markerElement,
+      });
+
+      const infoWindow = new window.google.maps.InfoWindow({
+        content: `<div style="padding: 10px;"><h2>${shp_addr}</h2><p>${address}</p></div>`,
+      });
+      marker.addListener('click', () => {
+        infoWindow.open(map, marker);
+      });
+
+      fireMarkersRef.current.push(marker);
+    });
+  }, [map, fireStations, showFireStations]);
+
+  // ----------------------------------------------------------------
+  // 11) Shelter Markers (blue)
+  // ----------------------------------------------------------------
   useEffect(() => {
-    if (map && shelters.length > 0 && window.google) {
-      shelterMarkersRef.current.forEach(marker => marker.setMap(null));
-      shelterMarkersRef.current = [];
-      shelters.forEach(shelter => {
-        const { latitude, longitude, name, streetAddress, city, state, zip } = shelter;
-        if (!latitude || !longitude) return;
-        const latNum = parseFloat(latitude), lngNum = parseFloat(longitude);
-        if (isNaN(latNum) || isNaN(lngNum)) return;
-        const markerElement = createMarkerContent('blue');
-        const marker = new window.google.maps.marker.AdvancedMarkerElement({
-          map,
-          position: { lat: latNum, lng: lngNum },
-          title: name,
-          content: markerElement,
-        });
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `<div style="padding: 10px;"><h2>${name}</h2><p>${streetAddress}, ${city}, ${state} ${zip}</p></div>`,
-        });
-        window.google.maps.event.addListener(marker, 'click', () => {
-          infoWindow.open(map, marker);
-        });
-        shelterMarkersRef.current.push(marker);
-      });
+    shelterMarkersRef.current.forEach(marker => marker.setMap(null));
+    shelterMarkersRef.current = [];
+
+    if (!map || !showShelters || shelters.length === 0 || !window.google) {
+      return;
     }
-  }, [map, shelters]);
 
+    shelters.forEach((shelter) => {
+      const { latitude, longitude, name, streetAddress, city, state, zip } = shelter;
+      if (!latitude || !longitude) return;
+      const latNum = parseFloat(latitude), lngNum = parseFloat(longitude);
+      if (isNaN(latNum) || isNaN(lngNum)) return;
 
-// Add Hydrant markers (custom firehydrant.png)
-useEffect(() => {
-  if (map && hydrants.length > 0 && window.google) {
-    // Clear existing hydrant markers
+      const markerElement = createMarkerContent('blue');
+      const marker = new window.google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: { lat: latNum, lng: lngNum },
+        title: name,
+        content: markerElement,
+      });
+
+      const infoWindow = new window.google.maps.InfoWindow({
+        content: `<div style="padding: 10px;"><h2>${name}</h2><p>${streetAddress}, ${city}, ${state} ${zip}</p></div>`,
+      });
+      marker.addListener('click', () => {
+        infoWindow.open(map, marker);
+      });
+
+      shelterMarkersRef.current.push(marker);
+    });
+  }, [map, shelters, showShelters]);
+
+  // ----------------------------------------------------------------
+  // 12) Hydrant Markers (custom icon)
+  // ----------------------------------------------------------------
+  useEffect(() => {
     hydrantMarkersRef.current.forEach((marker) => marker.setMap(null));
     hydrantMarkersRef.current = [];
+
+    if (!map || !showHydrants || hydrants.length === 0 || !window.google) {
+      return;
+    }
 
     hydrants.forEach((hydrant) => {
       if (!hydrant.latitude || !hydrant.longitude) return;
@@ -400,18 +434,17 @@ useEffect(() => {
       const lngNum = parseFloat(hydrant.longitude);
       if (isNaN(latNum) || isNaN(lngNum)) return;
 
-      // Use custom icon for hydrants
       const marker = new window.google.maps.Marker({
         map,
         position: { lat: latNum, lng: lngNum },
         icon: {
-          url: hydrantpng, 
-          scaledSize: new window.google.maps.Size(8, 10), // Scale the icon to 32x32
+          url: hydrantpng,
+          // adjust size as desired
+          scaledSize: new window.google.maps.Size(16, 20),
         },
         title: hydrant.sizeCode || 'Hydrant',
       });
 
-      // InfoWindow
       const infoHtml = `
         <div style="padding: 10px;">
           <h2>Hydrant #${hydrant.objectId || ''}</h2>
@@ -422,60 +455,76 @@ useEffect(() => {
           <a href="${hydrant.url || '#'}" target="_blank" rel="noopener noreferrer">Details</a>
         </div>
       `;
-      const infoWindow = new window.google.maps.InfoWindow({
-        content: infoHtml,
-      });
-
-      window.google.maps.event.addListener(marker, 'click', () => {
+      const infoWindow = new window.google.maps.InfoWindow({ content: infoHtml });
+      marker.addListener('click', () => {
         infoWindow.open(map, marker);
       });
 
       hydrantMarkersRef.current.push(marker);
     });
-  }
-}, [map, hydrants]);
+  }, [map, hydrants, showHydrants]);
 
-  // Create heatmap for fires
+  // ----------------------------------------------------------------
+  // 13) Fire Heatmap
+  // ----------------------------------------------------------------
   useEffect(() => {
-    if (map && fireLocations.length > 0 && window.google) {
-      if (heatmapRef.current) heatmapRef.current.setMap(null);
-      const heatmapData = fireLocations.map(fire => {
-        const { latitude, longitude, bright_ti4 } = fire;
-        const latNum = parseFloat(latitude), lngNum = parseFloat(longitude);
-        if (!latitude || !longitude || isNaN(latNum) || isNaN(lngNum)) return null;
-        return { location: new window.google.maps.LatLng(latNum, lngNum), weight: bright_ti4 || 0 };
-      }).filter(Boolean);
-      heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
-        data: heatmapData,
-        map,
-        radius: 20,
-        gradient: [
-          'rgba(0, 255, 255, 0)',
-          'rgba(0, 255, 255, 1)',
-          'rgba(0, 191, 255, 1)',
-          'rgba(0, 127, 255, 1)',
-          'rgba(0, 63, 255, 1)',
-          'rgba(0, 0, 255, 1)',
-          'rgba(63, 0, 255, 1)',
-          'rgba(127, 0, 255, 1)',
-          'rgba(191, 0, 255, 1)',
-          'rgba(255, 0, 255, 1)',
-          'rgba(255, 0, 191, 1)',
-          'rgba(255, 0, 127, 1)',
-          'rgba(255, 0, 63, 1)',
-          'rgba(255, 0, 0, 1)'
-        ],
-      });
+    // Remove old heatmap
+    if (heatmapRef.current) {
+      heatmapRef.current.setMap(null);
+      heatmapRef.current = null;
     }
-  }, [map, fireLocations]);
 
-  // Utility: Euclidean distance
+    // If we want to show heatmap & we have data:
+    if (!map || !showHeatmap || fireLocations.length === 0 || !window.google) {
+      return;
+    }
+
+    const heatmapData = fireLocations
+      .map((fire) => {
+        const latNum = parseFloat(fire.latitude);
+        const lngNum = parseFloat(fire.longitude);
+        if (isNaN(latNum) || isNaN(lngNum)) return null;
+        return {
+          location: new window.google.maps.LatLng(latNum, lngNum),
+          weight: fire.bright_ti4 || 0,
+        };
+      })
+      .filter(Boolean);
+
+    heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
+      data: heatmapData,
+      map,
+      radius: 20,
+      gradient: [
+        'rgba(0, 255, 255, 0)',
+        'rgba(0, 255, 255, 1)',
+        'rgba(0, 191, 255, 1)',
+        'rgba(0, 127, 255, 1)',
+        'rgba(0, 63, 255, 1)',
+        'rgba(0, 0, 255, 1)',
+        'rgba(63, 0, 255, 1)',
+        'rgba(127, 0, 255, 1)',
+        'rgba(191, 0, 255, 1)',
+        'rgba(255, 0, 255, 1)',
+        'rgba(255, 0, 191, 1)',
+        'rgba(255, 0, 127, 1)',
+        'rgba(255, 0, 63, 1)',
+        'rgba(255, 0, 0, 1)',
+      ],
+    });
+  }, [map, fireLocations, showHeatmap]);
+
+  // ----------------------------------------------------------------
+  // 14) Utility: Euclidean distance
+  // ----------------------------------------------------------------
   const distance = (lat1, lng1, lat2, lng2) => {
     return Math.sqrt((lat1 - lat2) ** 2 + (lng1 - lng2) ** 2);
   };
 
-  // Create an avoidance polygon around a fire in WKT format
-  const createAvoidPolygonWKT = (fire, delta = 0.1) => { 
+  // ----------------------------------------------------------------
+  // 15) GraphHopper & Routing Logic (unchanged)
+  // ----------------------------------------------------------------
+  const createAvoidPolygonWKT = (fire, delta = 0.1) => {
     const lat = fire.latitude;
     const lng = fire.longitude;
     const coordinates = [
@@ -483,7 +532,7 @@ useEffect(() => {
       `${lng - delta} ${lat + delta}`,
       `${lng + delta} ${lat + delta}`,
       `${lng + delta} ${lat - delta}`,
-      `${lng - delta} ${lat - delta}`
+      `${lng - delta} ${lat - delta}`,
     ].join(', ');
     return `polygon((${coordinates}))`;
   };
@@ -767,6 +816,9 @@ Provide assignments in JSON format.`;
     }
   };
 
+  // ----------------------------------------------------------------
+  // Render
+  // ----------------------------------------------------------------
   return (
     <div className="relative">
       {loading && (
@@ -802,6 +854,68 @@ Provide assignments in JSON format.`;
         </button>
       </div>
 
+      {/* NEW: Overlays Toggle UI at bottom-right */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 10,
+          right: 10,
+          zIndex: 5,
+          background: 'white',
+          padding: '10px',
+          borderRadius: '5px',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+        }}
+      >
+        <div style={{ fontWeight: 'bold', marginBottom: '6px' }}>Overlays</div>
+
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={showFireStations}
+            onChange={() => setShowFireStations(!showFireStations)}
+          />
+          {' '}Fire Stations
+        </label>
+
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={showShelters}
+            onChange={() => setShowShelters(!showShelters)}
+          />
+          {' '}Shelters
+        </label>
+
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={showHydrants}
+            onChange={() => setShowHydrants(!showHydrants)}
+          />
+          {' '}Fire Hydrants
+        </label>
+
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={showHeatmap}
+            onChange={() => setShowHeatmap(!showHeatmap)}
+          />
+          {' '}Heatmap
+        </label>
+
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={showWeatherAlerts}
+            onChange={() => setShowWeatherAlerts(!showWeatherAlerts)}
+          />
+          {' '}Weather Alerts
+        </label>
+      </div>
+
+      {/* The actual map */}
       <div id="map" style={{ width: '100%', height: '100vh' }}></div>
     </div>
   );
