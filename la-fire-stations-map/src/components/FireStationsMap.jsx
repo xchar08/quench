@@ -678,7 +678,7 @@ const FireStationsMap = () => {
       idx++;
       if (idx >= pathCoords.length) {
         clearInterval(interval);
-        // Extinguish the fire
+        // Extinguish the fire and update counts
         handleFireExtinguish(fire);
         // Remove the truck
         marker.setMap(null);
