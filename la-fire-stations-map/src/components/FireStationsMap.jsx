@@ -14,14 +14,9 @@ const FireStationsMap = () => {
   const [loading, setLoading] = useState(true);
   const [map, setMap] = useState(null);
   const [fireLocations, setFireLocations] = useState([]);
-<<<<<<< HEAD
   const [alerts, setAlerts] = useState([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
-  const fireMarkersRef = useRef([]);
-  const shelterMarkersRef = useRef([]);
-  const heatmapRef = useRef(null);
   const alertsRef = useRef(null);
-=======
   const [pathPolyline, setPathPolyline] = useState(null);
   const [model, setModel] = useState(null);
 
@@ -30,23 +25,19 @@ const FireStationsMap = () => {
   const heatmapRef = useRef(null);
   const hydrantMarkersRef = useRef([]);
   const geocoderRef = useRef(null);
->>>>>>> a1da06fd159b9c55986683a237c4118b5eed2062
 
   // API Keys from environment variables
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
-<<<<<<< HEAD
   const californiaBounds = {
     north: 42.0095,
     south: 32.5343,
     west: -124.4096,
     east: -114.1315
   };
-=======
   const GRAPH_HOPPER_API_KEY = import.meta.env.VITE_GRAPH_HOPPER_API_KEY;
   const TF_MODEL_URL = import.meta.env.VITE_TF_MODEL_URL;
   const NEBIUS_API_KEY = import.meta.env.VITE_NEBIUS_API_KEY;
->>>>>>> a1da06fd159b9c55986683a237c4118b5eed2062
 
   // Initialize Nebius AI client with browser allowance (for testing only)
   const nebiusClient = new OpenAI({
@@ -72,7 +63,6 @@ const FireStationsMap = () => {
     return locations;
   };
 
-<<<<<<< HEAD
   // fetch nws danger zones data
   useEffect(() => {
     const fetchWeatherAlerts = async () => {
@@ -115,9 +105,7 @@ const FireStationsMap = () => {
   };
 
   // Fetch Fire Stations Data
-=======
   // Data fetching
->>>>>>> a1da06fd159b9c55986683a237c4118b5eed2062
   useEffect(() => {
     const fetchFireStations = async () => {
       try {
@@ -259,7 +247,6 @@ const FireStationsMap = () => {
     return div;
   };
 
-<<<<<<< HEAD
  // Render alerts on the map after fetching them
  useEffect(() => {
   if (map && !alertsLoading && alerts.length > 0) {
@@ -342,9 +329,7 @@ const FireStationsMap = () => {
 
 
   // Add Fire Station Markers to the Map (red)
-=======
   // Add Fire Station markers (red)
->>>>>>> a1da06fd159b9c55986683a237c4118b5eed2062
   useEffect(() => {
     if (map && fireStations.length > 0 && window.google) {
       fireMarkersRef.current.forEach(marker => marker.setMap(null));
