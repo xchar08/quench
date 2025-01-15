@@ -1,8 +1,0 @@
-beautifulsoup4
-requests
-gym
-numpy
-modal
-arcgis
-Flask
-python-dotenv
