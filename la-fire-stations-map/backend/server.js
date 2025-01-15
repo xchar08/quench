@@ -66,6 +66,7 @@ app.get('/api/shelters', async (req, res) => {
         const zip = columns[4]?.innerText.trim() || 'N/A';
         const latitude = parseFloat(columns[5]?.innerText.trim()) || null;
         const longitude = parseFloat(columns[6]?.innerText.trim()) || null;
+          // zip is state, state is county, city is address. address is city
 
         return {
           name,

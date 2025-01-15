@@ -595,7 +595,7 @@ Provide assignments in JSON format.`;
       alert('Please enter a valid address.');
       return;
     }
-
+  
     geocoderRef.current.geocode({ address }, async (results, status) => {
       if (status === 'OK' && results[0]) {
         const userLocation = results[0].geometry.location;
@@ -604,13 +604,24 @@ Provide assignments in JSON format.`;
         // Find nearest shelter
         let nearestShelter = null;
         let minDist = Infinity;
+        let fullAddress = null;
+        let city = null;
+
         shelters.forEach((shelter) => {
           const lat = parseFloat(shelter.latitude);
           const lng = parseFloat(shelter.longitude);
           const d = distance(userLocation.lat(), userLocation.lng(), lat, lng);
+          const streetAddress = shelter.streetAddress
+          const city = shelter.city
+          const state = shelter.state
+          const zip = shelter.zip
+          const name = shelter.name
+          const fullAddress = `${city}, ${state}, ${streetAddress}, ${zip}`;
+          // zip is state, state is city, city is address. address is county
+
           if (d < minDist) {
             minDist = d;
-            nearestShelter = { lat, lng };
+            nearestShelter = { lat, lng , fullAddress, city, state, zip, name, d};
           }
         });
 
@@ -619,7 +630,24 @@ Provide assignments in JSON format.`;
           return;
         }
 
-        console.log('Nearest Shelter:', nearestShelter);
+        console.log('Nearest Shelter:', nearestShelter, fullAddress, city);
+        
+        const shelterInfoWindow = new window.google.maps.InfoWindow({
+          content: `<div><strong>Shelter Name: ${nearestShelter.name}</strong><br>
+                    Nearest Shelter<br>
+                    Address: ${nearestShelter.fullAddress}<br>
+                   `,
+          position: { lat: nearestShelter.lat, lng: nearestShelter.lng },
+        });
+      // Open InfoWindow on map
+      shelterInfoWindow.open(map);
+
+      // Optionally, place a marker at the shelter location
+      const shelterMarker = new window.google.maps.Marker({
+        position: { lat: nearestShelter.lat, lng: nearestShelter.lng },
+        map,
+        title: 'Nearest Shelter',
+      });
 
         // Find fires within ~10 km radius
         let firesToAvoid = fireLocations.filter(fire => {

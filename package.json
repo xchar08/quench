@@ -1,5 +1,9 @@
 {
   "dependencies": {
+    "@googlemaps/js-api-loader": "^1.16.8",
+    "@tensorflow/tfjs": "^4.22.0",
+    "axios": "^1.7.9",
+    "openai": "^4.78.1",
     "papaparse": "^5.5.1"
   }
 }
