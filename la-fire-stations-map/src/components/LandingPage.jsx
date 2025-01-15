@@ -23,7 +23,7 @@ export default function LandingPage() {
             Explore Map
           </Link>
           <a
-            href="#learn-more"
+            href="/about"
             className="px-8 py-3 text-lg font-semibold rounded-full border-2 border-white hover:bg-white hover:text-[#a6004d] transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-pink-300"
           >
             Learn More
