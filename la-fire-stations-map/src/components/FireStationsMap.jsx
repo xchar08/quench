@@ -6,7 +6,7 @@ import Papa from 'papaparse';
 import * as tf from '@tensorflow/tfjs';
 import OpenAI from 'openai';
 
-// IMAGE IMPORTS (adjust to your paths)
+// IMAGE IMPORTS (adjust paths for your setup)
 import hydrantpng from '../assets/firehydrant.png';
 import firetruckPng from '../assets/firetruck.png';
 import shelterPng from '../assets/shelter.png';
@@ -17,17 +17,17 @@ import spinningCatGif from '../assets/spinningcat.gif';
 import chatbotImg1 from '../assets/chatbot/bot1.png';
 import chatbotImg2 from '../assets/chatbot/bot2.png';
 
-// ENV (from your .env via Vite)
+// ENV (from your .env)
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
 const NEBIUS_API_KEY = import.meta.env.VITE_NEBIUS_API_KEY;
 
 /**
  * createCirclePolygonGeoJson:
- *  Generates a ring of lat/lng points (forming a circle) for "avoid_polygons".
+ *  Generates a ring of lat/lng points forming a circle => used for "avoid_polygons".
  */
 function createCirclePolygonGeoJson(lat, lng, radiusKm = 10, sides = 36) {
-  // ~1 deg lat ~ 111 km
+  // ~1 deg latitude ~ 111 km
   const degRadius = radiusKm / 111;
   const coords = [];
   for (let i = 0; i < sides; i++) {
@@ -56,7 +56,7 @@ function QuirkyInsuranceChatbot() {
 
   const chatbotImages = [chatbotImg1, chatbotImg2];
 
-  // Nebius AI
+  // Nebius AI client
   const nebiusClient = new OpenAI({
     baseURL: 'https://api.studio.nebius.ai/v1/',
     apiKey: NEBIUS_API_KEY,
@@ -181,13 +181,13 @@ function QuirkyInsuranceChatbot() {
 
 /**
  * FIRESTATIONSMAP
- * - NASA FIRMS => Heatmap
- * - NOAA => polygons + spinning cat
+ * - NASA FIRMS => heatmap (toggle on/off)
+ * - NOAA => polygons + spinning cat (toggle on/off)
  * - Fire Stations, Shelters, Hydrants => toggles
  * - Deploy trucks (with firetruck animation)
  * - Find Nearest Shelter => Avoid top 50 brightest fires
- * - TF model training
- * - GraphHopper calls => /api/graphhopper-route proxy to avoid CORS
+ * - TF model
+ * - GraphHopper calls => /api/graphhopper-route
  */
 const FireStationsMap = () => {
   const [loading, setLoading] = useState(true);
@@ -210,6 +210,8 @@ const FireStationsMap = () => {
   const [showFireStations, setShowFireStations] = useState(true);
   const [showShelters, setShowShelters] = useState(true);
   const [showHydrants, setShowHydrants] = useState(true);
+  const [showFires, setShowFires] = useState(true);      // NEW: toggle NASA FIRMS
+  const [showAlerts, setShowAlerts] = useState(true);    // NEW: toggle NOAA Alerts
 
   // TF model
   const [model, setModel] = useState(null);
@@ -220,12 +222,12 @@ const FireStationsMap = () => {
   const fireStationMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
   const hydrantMarkersRef = useRef([]);
-  const alertsRef = useRef([]);
-  const dangerMarkersRef = useRef([]);
+  const alertsRef = useRef([]);          // store NOAA polygons
+  const dangerMarkersRef = useRef([]);   // store spinning cat markers
   const truckMarkersRef = useRef([]);
   const [pathPolyline, setPathPolyline] = useState(null);
 
-  // Active Fires => length of fireLocations
+  // ActiveFires => length of fireLocations
   useEffect(() => {
     setActiveFires(fireLocations.length);
   }, [fireLocations]);
@@ -300,7 +302,7 @@ const FireStationsMap = () => {
 
   // NOAA Summaries => optional
   const summarizeText = async (text) => {
-    // skip for brevity or use Nebius
+    // skip or use Nebius
     return text || '';
   };
 
@@ -330,18 +332,14 @@ const FireStationsMap = () => {
 
   const getAlertColor = (severity) => {
     switch (severity) {
-      case 'Severe':
-        return 'red';
-      case 'Warning':
-        return 'orange';
-      case 'Watch':
-        return 'blue';
-      case 'Advisory':
-        return 'yellow';
-      default:
-        return 'green';
+      case 'Severe': return 'red';
+      case 'Warning': return 'orange';
+      case 'Watch': return 'blue';
+      case 'Advisory': return 'yellow';
+      default: return 'green';
     }
   };
+
   const getPolygonCentroid = (coords) => {
     let latSum = 0, lngSum = 0;
     coords.forEach(([ln, la]) => {
@@ -350,8 +348,16 @@ const FireStationsMap = () => {
     });
     return { lat: latSum / coords.length, lng: lngSum / coords.length };
   };
+
+  // Draw NOAA polygons + cat markers
   useEffect(() => {
     if (!map || !window.google || alertsLoading || !alerts.length) return;
+
+    // Clear old polygons/markers
+    alertsRef.current.forEach((p) => p.setMap(null));
+    dangerMarkersRef.current.forEach((m) => m.setMap(null));
+    alertsRef.current = [];
+    dangerMarkersRef.current = [];
 
     alerts.forEach((alert) => {
       const sev = alert.properties.severity || 'Unknown';
@@ -377,7 +383,7 @@ const FireStationsMap = () => {
                 strokeWeight: 2,
                 fillColor: color,
                 fillOpacity: 0.1,
-                map,
+                // setMap => we toggle below
               });
 
               const infoText = alert.properties.summary || alert.properties.description || '';
@@ -388,10 +394,9 @@ const FireStationsMap = () => {
                 infoWindow.setPosition(e.latLng);
                 infoWindow.open(map);
               });
-              if (!alertsRef.current) alertsRef.current = [];
               alertsRef.current.push(polygon);
 
-              // spinning cat marker
+              // spinning cat
               const centroid = getPolygonCentroid(coords);
               const catMarker = new window.google.maps.Marker({
                 position: centroid,
@@ -399,7 +404,7 @@ const FireStationsMap = () => {
                   url: spinningCatGif,
                   scaledSize: new window.google.maps.Size(35, 35),
                 },
-                map,
+                // setMap => toggled below
                 optimized: false,
                 title: `Alert: ${sev}`,
               });
@@ -586,11 +591,18 @@ const FireStationsMap = () => {
   }, [map, hydrants, showHydrants]);
 
   // NASA => Heatmap
+  // We toggle the heatmap on/off based on showFires
   useEffect(() => {
-    if (!map || !window.google || !fireLocations.length) return;
+    if (!map || !window.google) return;
+
+    // If we already have a heatmap, remove it
     if (heatmapRef.current) {
       heatmapRef.current.setMap(null);
     }
+    if (!showFires || !fireLocations.length) {
+      return; // don't rebuild the heatmap if toggled off or no fires
+    }
+
     const points = fireLocations
       .map((f) => {
         if (isNaN(f.latitude) || isNaN(f.longitude)) return null;
@@ -606,7 +618,18 @@ const FireStationsMap = () => {
       map,
       radius: 30,
     });
-  }, [map, fireLocations]);
+  }, [map, fireLocations, showFires]);
+
+  // NOAA => Toggling polygons/cats
+  // We'll do a separate effect that sets each polygon/cat's map to either "map" or null
+  useEffect(() => {
+    if (!map || !window.google) return;
+    if (!alertsRef.current.length && !dangerMarkersRef.current.length) return;
+
+    // toggling showAlerts => setMap(showAlerts ? map : null)
+    alertsRef.current.forEach((poly) => poly.setMap(showAlerts ? map : null));
+    dangerMarkersRef.current.forEach((cat) => cat.setMap(showAlerts ? map : null));
+  }, [map, showAlerts]);
 
   // Fire Extinguish
   const removeFire = (fire) => {
@@ -674,11 +697,7 @@ const FireStationsMap = () => {
     return resp.json();
   };
 
-  /**
-   * Instead of building polygons for *all* fires,
-   * let's only build polygons for the top 50 brightest fires
-   * to avoid 413 Payload Too Large.
-   */
+  // fetchRouteAvoidingFires => limit top 50 bright fires => multiPolygon
   const fetchRouteAvoidingFires = async (origin, dest) => {
     if (!fireLocations || !fireLocations.length) {
       console.warn('No fires => no avoids. Returning direct route...');
@@ -691,11 +710,9 @@ const FireStationsMap = () => {
         points_encoded: false,
       });
     }
-    // 1) Sort fires by brightness
+    // sort by brightness
     const sorted = [...fireLocations].sort((a, b) => (b.bright_ti4 || 0) - (a.bright_ti4 || 0));
-    // 2) Take top 50
-    const topFires = sorted.slice(0, 50);
-    // 3) Build circle polygons
+    const topFires = sorted.slice(0, 50); // limit to top 50
     const circles = topFires.map((f) =>
       createCirclePolygonGeoJson(f.latitude, f.longitude, 10, 36)
     );
@@ -789,7 +806,7 @@ const FireStationsMap = () => {
             map.setCenter(coords[0]);
             map.setZoom(10);
           } else {
-            alert('No route found. Possibly due to limited avoid polygons.');
+            alert('No route found. Possibly due to limited avoids.');
           }
         } catch (err) {
           console.error('Error fetching route:', err);
@@ -843,7 +860,7 @@ const FireStationsMap = () => {
               lat: la,
               lng: ln,
             }));
-            // Draw a red polyline
+            // Draw red polyline
             new window.google.maps.Polyline({
               path: coords,
               geodesic: true,
@@ -852,7 +869,7 @@ const FireStationsMap = () => {
               strokeWeight: 4,
               map,
             });
-            // Animate the truck => extinguish the fire
+            // Animate the truck => extinguish
             animateTruckSprite(coords, bestFire);
           }
         } catch (err) {
@@ -933,6 +950,24 @@ const FireStationsMap = () => {
               onChange={(e) => setShowHydrants(e.target.checked)}
             />
             <span>Show Hydrants</span>
+          </label>
+
+          {/* NEW toggles for NASA + NOAA */}
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={showFires}
+              onChange={(e) => setShowFires(e.target.checked)}
+            />
+            <span>Show Fire Heatmap</span>
+          </label>
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={showAlerts}
+              onChange={(e) => setShowAlerts(e.target.checked)}
+            />
+            <span>Show NOAA Alerts</span>
           </label>
         </div>
       </div>
