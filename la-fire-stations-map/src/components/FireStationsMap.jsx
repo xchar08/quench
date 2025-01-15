@@ -758,7 +758,7 @@ const FireStationsMap = () => {
       alert('Please enter an address.');
       return;
     }
-
+  
     geocoderRef.current.geocode({ address }, async (results, status) => {
       if (status === 'OK' && results[0]) {
         const loc = results[0].geometry.location;
@@ -879,6 +879,9 @@ const FireStationsMap = () => {
     }
   };
 
+  // ----------------------------------------------------------------
+  // Render
+  // ----------------------------------------------------------------
   return (
     <div className="relative w-full h-screen font-sans">
       {loading && (
