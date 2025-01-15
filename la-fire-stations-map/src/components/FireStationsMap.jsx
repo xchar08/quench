@@ -1,5 +1,5 @@
 // src/components/FireStationsMap.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
 import Papa from 'papaparse';
@@ -16,6 +16,9 @@ import spinningCatGif from '../assets/spinningcat.gif';
 // Chatbot images
 import chatbotImg1 from '../assets/chatbot/bot1.png';
 import chatbotImg2 from '../assets/chatbot/bot2.png';
+
+// Import the FireCountContext
+import { FireCountContext } from '../contexts/FireCountContext';
 
 // ENV (from your .env)
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -190,6 +193,8 @@ function QuirkyInsuranceChatbot() {
  * - GraphHopper calls => /api/graphhopper-route
  */
 const FireStationsMap = () => {
+  const { activeFires, extinguishedCount, incrementExtinguished, decrementActive, setInitialActiveFires } = useContext(FireCountContext);
+
   const [loading, setLoading] = useState(true);
   const [map, setMap] = useState(null);
 
@@ -201,10 +206,7 @@ const FireStationsMap = () => {
   const [alerts, setAlerts] = useState([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
 
-  // Scoreboard
-  const [distanceTraveled, setDistanceTraveled] = useState(null);
-  const [extinguishedCount, setExtinguishedCount] = useState(0);
-  const [activeFires, setActiveFires] = useState(0);
+  // Scoreboard: Now managed via Context
 
   // Toggles
   const [showFireStations, setShowFireStations] = useState(true);
@@ -226,8 +228,6 @@ const FireStationsMap = () => {
   const dangerMarkersRef = useRef([]);   // store spinning cat markers
   const truckMarkersRef = useRef([]);
   const [pathPolyline, setPathPolyline] = useState(null);
-
-  // Removed the conflicting useEffect for activeFires
 
   // ============== TF MODEL (dummy) ==============
   useEffect(() => {
@@ -443,15 +443,16 @@ const FireStationsMap = () => {
         const text = await resp.text();
         const fires = csvToJson(text) || [];
         setFireLocations(Array.isArray(fires) ? fires : []);
-        setActiveFires(fires.length); // Initialize activeFires based on fetched fires
+        setInitialActiveFires(fires.length); // Initialize activeFires based on fetched fires
+        console.log('Fetched Fires:', fires);
       } catch (err) {
         console.error('Error fetching NASA FIRMS data:', err);
         setFireLocations([]);
-        setActiveFires(0); // Initialize activeFires to 0 if fetch fails
+        setInitialActiveFires(0); // Initialize activeFires to 0 if fetch fails
       }
     };
     fetchFires();
-  }, []);
+  }, [setInitialActiveFires]);
 
   // Fire Stations
   useEffect(() => {
@@ -639,11 +640,11 @@ const FireStationsMap = () => {
     setFireLocations((old) =>
       old.filter((f) => f.id !== fireId)
     );
-    setExtinguishedCount((prev) => prev + 1);
-    setActiveFires((prev) => prev - 1);
+    incrementExtinguished();
+    decrementActive();
     console.log(`Fire with ID ${fireId} extinguished.`);
   };
-
+  
   const handleFireExtinguish = (fire) => {
     let val = fire.bright_ti4 || 0;
     if (val > 330) val -= 200;
@@ -657,8 +658,8 @@ const FireStationsMap = () => {
     } else {
       // force re-render => update heatmap
       setFireLocations((old) => [...old]);
+      console.log(`Fire ID ${fire.id} updated. New brightness: ${val}`);
     }
-    console.log(`Fire ID ${fire.id} updated. New brightness: ${val}`);
   };
 
   // Animate truck marker along coords
