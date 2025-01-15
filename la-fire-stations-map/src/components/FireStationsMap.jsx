@@ -9,14 +9,23 @@ const FireStationsMap = () => {
   const [shelters, setShelters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [map, setMap] = useState(null);
+  const [fireLocations, setFireLocations] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [alertsLoading, setAlertsLoading] = useState(true);
   const fireMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
   const heatmapRef = useRef(null);
-  const [fireLocations, setFireLocations] = useState([]);
+  const alertsRef = useRef(null);
 
   // Retrieve API key and Map ID from environment variables
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
+  const californiaBounds = {
+    north: 42.0095,
+    south: 32.5343,
+    west: -124.4096,
+    east: -114.1315
+  };
 
   // Parse CSV and return an array of fire location objects with temperature data
   const csvToJson = (csv) => {
@@ -33,6 +42,47 @@ const FireStationsMap = () => {
     }));
     console.log("Parsed fire locations:", locations);
     return locations;
+  };
+
+  // fetch nws danger zones data
+  useEffect(() => {
+    const fetchWeatherAlerts = async () => {
+      try {
+        setAlertsLoading(true);
+
+        // Make API request to get weather alerts based on latitude and longitude
+
+        const response = await axios.get('https://api.weather.gov/alerts/active?area=CA');
+        const filteredAlerts = response.data.features.filter((alert) => {
+          const severity = alert.properties.severity;
+          // Check if the severity is a red flag warning or equivalent
+          return severity === 'Severe'; // You can also check other fields depending on the API response
+        });
+        // Set the alerts state with the response data
+        setAlerts(filteredAlerts);
+        setAlertsLoading(false);
+      } catch (error) {
+        console.error('Error fetching alerts:', error);
+        setAlertsLoading(false);
+      }
+    };
+
+    fetchWeatherAlerts();
+  }, []);
+
+  const getAlertColor = (severity) => {
+    switch (severity) {
+      case 'Severe':
+        return 'red';
+      case 'Warning':
+        return 'orange';
+      case 'Advisory':
+        return 'yellow';
+      case 'Watch':
+        return 'blue';
+      default:
+        return 'green';
+    }
   };
 
   // Fetch Fire Stations Data
@@ -131,6 +181,87 @@ const FireStationsMap = () => {
     div.style.border = '2px solid white';
     return div;
   };
+
+ // Render alerts on the map after fetching them
+ useEffect(() => {
+  if (map && !alertsLoading && alerts.length > 0) {
+    // Clear previous alert markers
+    // alertsRef.current.forEach(marker => marker.setMap(null));
+    // if (alertsRef.current && Array.isArray(alertsRef.current)) {
+    //   alertsRef.current.forEach(marker => marker.setMap(null));
+    //   alertsRef.current = []; // Reset the array to avoid re-adding markers
+    // }
+    // GEOMETRIES ARE ALL NULL....
+    alerts.forEach((alert) => {
+      const { geometry, properties } = alert;
+      const affectedZones = properties.affectedZones;
+
+      if (affectedZones && affectedZones.length > 0) {
+        affectedZones.forEach(async (zoneUrl) => {
+          // Fetch zone information (i.e., geometry and coordinates)
+          try {
+            const zoneResponse = await axios.get(zoneUrl);
+            const zoneData = zoneResponse.data;
+            const zoneGeometry = zoneData.geometry;
+
+            if (zoneGeometry && zoneGeometry.type === 'Polygon' && zoneGeometry.coordinates) {
+              const polygonPath = zoneGeometry.coordinates[0].map(coord => ({
+                lat: coord[1],
+                lng: coord[0]
+              }));
+
+              // Create a polygon for the alert zone
+              const alertColor = getAlertColor(properties.severity);
+              
+              const polygon = new google.maps.Polygon({
+                paths: polygonPath,
+                strokeColor: alertColor,
+                strokeOpacity: 0.1,
+                strokeWeight: 2,
+                fillColor: alertColor,
+                fillOpacity: 0.1,
+                map,
+              });
+              
+              const infoWindow = new google.maps.InfoWindow({
+                content: `
+                  <div style="padding: 5px; font-family: Arial, sans-serif;">
+                    
+                    <p>Red Flag Warning - WildFire Alert Zone ${zoneUrl}</p>
+                  </div>
+                `,
+              });
+      
+              // google.maps.event.addListener(polygon, 'click', () => {
+              //   console.log("clicked")
+                // infoWindow.setPosition(polygon.getBounds().getCenter());
+              //   infoWindow.open(map, polygon);
+              // });
+              // const infoWindow = new google.maps.InfoWindow();
+
+              // Add a click event listener to the polygon
+              google.maps.event.addListener(polygon, 'click', function(event) {
+                console.log('Polygon clicked at:', event.latLng); // log the click position
+              
+                // Position the info window at the clicked location
+                infoWindow.setPosition(event.latLng);
+            
+                // infoWindow.setContent('You clicked on the polygon!');
+                infoWindow.open(map);
+              });
+              
+              alertsRef.current.push(polygon);
+            }
+          } catch (error) {
+            console.error('Error fetching zone data:', error);
+          }
+        });
+      }
+    });
+  }
+}, [map, alerts, alertsLoading]);
+
+
 
   // Add Fire Station Markers to the Map (red)
   useEffect(() => {
