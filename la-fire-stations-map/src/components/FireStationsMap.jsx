@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
 import Papa from 'papaparse';
+import * as tf from '@tensorflow/tfjs'; // TensorFlow.js
+import OpenAI from 'openai'; // Nebius AI client
 
 const FireStationsMap = () => {
   // States and refs
@@ -12,6 +14,7 @@ const FireStationsMap = () => {
   const [map, setMap] = useState(null);
   const [fireLocations, setFireLocations] = useState([]);
   const [pathPolyline, setPathPolyline] = useState(null);
+  const [model, setModel] = useState(null);
 
   const fireMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
@@ -22,6 +25,15 @@ const FireStationsMap = () => {
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
   const GRAPH_HOPPER_API_KEY = import.meta.env.VITE_GRAPH_HOPPER_API_KEY;
+  const TF_MODEL_URL = import.meta.env.VITE_TF_MODEL_URL;
+  const NEBIUS_API_KEY = import.meta.env.VITE_NEBIUS_API_KEY;
+
+  // Initialize Nebius AI client with browser allowance (for testing only)
+  const nebiusClient = new OpenAI({
+    baseURL: 'https://api.studio.nebius.ai/v1/',
+    apiKey: NEBIUS_API_KEY,
+    dangerouslyAllowBrowser: true,  // WARNING: Exposes API key in browser
+  });
 
   // CSV parsing
   const csvToJson = (csv) => {
@@ -31,10 +43,10 @@ const FireStationsMap = () => {
       dynamicTyping: true,
     });
     const locations = results.data.map((fire) => ({
-      latitude: fire.latitude,
-      longitude: fire.longitude,
-      bright_ti4: fire.bright_ti4,
-      bright_ti5: fire.bright_ti5,
+      latitude: parseFloat(fire.latitude),
+      longitude: parseFloat(fire.longitude),
+      bright_ti4: parseFloat(fire.bright_ti4),
+      bright_ti5: parseFloat(fire.bright_ti5),
     }));
     console.log("Parsed fire locations:", locations);
     return locations;
@@ -81,21 +93,39 @@ const FireStationsMap = () => {
     fetchFireData();
   }, []);
 
-  // Initialize Google Maps with visualization library
+  // Train a dummy TensorFlow.js model (placeholder)
+  useEffect(() => {
+    const trainDummyModel = async () => {
+      try {
+        const dummyModel = tf.sequential();
+        dummyModel.add(tf.layers.dense({units: 10, inputShape: [3], activation: 'relu'}));
+        dummyModel.add(tf.layers.dense({units: 3, activation: 'softmax'}));
+        dummyModel.compile({optimizer: 'adam', loss: 'categoricalCrossentropy'});
+        const xs = tf.randomNormal([100, 3]);
+        const ys = tf.randomUniform([100, 3]);
+        await dummyModel.fit(xs, ys, {epochs: 5});
+        setModel(dummyModel);
+        console.log('Dummy model trained successfully.');
+      } catch (error) {
+        console.error('Error training dummy model:', error);
+      }
+    };
+    trainDummyModel();
+  }, []);
+
+  // Initialize Google Maps
   useEffect(() => {
     if (!googleMapsApiKey) {
       console.error('Google Maps API key is missing.');
       setLoading(false);
       return;
     }
-
     const loader = new Loader({
       apiKey: googleMapsApiKey,
       version: 'weekly',
       libraries: ['marker', 'visualization'],
       mapId: mapId || undefined,
     });
-
     let isMounted = true;
     loader.load().then((google) => {
       if (isMounted) {
@@ -113,11 +143,10 @@ const FireStationsMap = () => {
       console.error('Error loading Google Maps:', e);
       setLoading(false);
     });
-
     return () => { isMounted = false; };
   }, [googleMapsApiKey, mapId]);
 
-  // Initialize geocoder once map is ready
+  // Initialize geocoder
   useEffect(() => {
     if (map && window.google) {
       geocoderRef.current = new window.google.maps.Geocoder();
@@ -230,19 +259,22 @@ const FireStationsMap = () => {
     return Math.sqrt((lat1 - lat2) ** 2 + (lng1 - lng2) ** 2);
   };
 
-  // Create an avoidance polygon around a fire
-  const createAvoidPolygon = (fire, delta = 0.01) => {
-    return [
-      `${fire.latitude - delta},${fire.longitude - delta}`,
-      `${fire.latitude - delta},${fire.longitude + delta}`,
-      `${fire.latitude + delta},${fire.longitude + delta}`,
-      `${fire.latitude + delta},${fire.longitude - delta}`,
-      `${fire.latitude - delta},${fire.longitude - delta}`
-    ].join('|');
+  // Create an avoidance polygon around a fire in WKT format
+  const createAvoidPolygonWKT = (fire, delta = 0.1) => { 
+    const lat = fire.latitude;
+    const lng = fire.longitude;
+    const coordinates = [
+      `${lng - delta} ${lat - delta}`,
+      `${lng - delta} ${lat + delta}`,
+      `${lng + delta} ${lat + delta}`,
+      `${lng + delta} ${lat - delta}`,
+      `${lng - delta} ${lat - delta}`
+    ].join(', ');
+    return `polygon((${coordinates}))`;
   };
 
-  // Fetch route from GraphHopper avoiding specified polygon
-  const fetchRouteAvoidingFires = async (origin, destination, avoidPolygon) => {
+  // Fetch route from GraphHopper avoiding specified polygons
+  const fetchRouteAvoidingFires = async (origin, destination, avoidPolygons) => {
     const baseUrl = 'https://graphhopper.com/api/1/route';
     const params = new URLSearchParams();
     params.append('key', GRAPH_HOPPER_API_KEY);
@@ -251,10 +283,33 @@ const FireStationsMap = () => {
     params.append('vehicle', 'car');
     params.append('points_encoded', 'false');
     params.append('type', 'json');
-    if (avoidPolygon) {
-      params.append('avoid_polygons', avoidPolygon);
-    }
+
+    avoidPolygons.forEach(polygon => {
+      params.append('avoid_polygons', polygon);
+    });
+
     const url = `${baseUrl}?${params.toString()}`;
+    console.log('GraphHopper API URL:', url);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`GraphHopper API error: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data;
+  };
+
+  // Simple route fetch without avoidance
+  const fetchRouteSimple = async (origin, destination) => {
+    const baseUrl = 'https://graphhopper.com/api/1/route';
+    const params = new URLSearchParams();
+    params.append('key', GRAPH_HOPPER_API_KEY);
+    params.append('point', `${origin.lat},${origin.lng}`);
+    params.append('point', `${destination.lat},${destination.lng}`);
+    params.append('vehicle', 'car');
+    params.append('points_encoded', 'false');
+    params.append('type', 'json');
+    const url = `${baseUrl}?${params.toString()}`;
+    console.log('Simple Route URL:', url);
     const response = await fetch(url);
     const data = await response.json();
     return data;
@@ -266,26 +321,72 @@ const FireStationsMap = () => {
     const marker = new window.google.maps.Marker({
       map,
       position: pathCoordinates[0],
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: '#FF0000',
+        fillOpacity: 1,
+        strokeWeight: 1,
+      },
     });
     let index = 0;
     const interval = setInterval(() => {
       index++;
       if (index >= pathCoordinates.length) {
         clearInterval(interval);
+        marker.setMap(null);
       } else {
         marker.setPosition(pathCoordinates[index]);
       }
-    }, 500);
+    }, 200);
   };
 
-  // Handle search and route computation
+  // Nebius AI function for optimal deployment suggestions (placeholder)
+  const getOptimalDeploymentsFromNebius = async (stations, fires) => {
+    const prompt = `Here are fire stations: ${JSON.stringify(stations)}.
+Here are fires: ${JSON.stringify(fires)}.
+Suggest optimal deployment of 3 trucks per station to extinguish fires.
+Provide assignments in JSON format.`;
+    try {
+      const response = await nebiusClient.chat.completions.create({
+        max_tokens: 500,
+        temperature: 0.7,
+        top_p: 1,
+        top_k: 50,
+        n: 1,
+        stream: false,
+        model: "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert in emergency response planning."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ]
+      });
+      console.log("Nebius AI assignments:", response.choices[0].message.content);
+    } catch (error) {
+      console.error("Error with Nebius AI API:", error);
+    }
+  };
+
+  // Handle search and route computation for nearest shelter
   const handleSearch = async () => {
-    const address = document.getElementById('address-input').value;
-    if (!address || !geocoderRef.current) return;
+    const address = document.getElementById('address-input').value.trim();
+    if (!address || !geocoderRef.current) {
+      alert('Please enter a valid address.');
+      return;
+    }
 
     geocoderRef.current.geocode({ address }, async (results, status) => {
       if (status === 'OK' && results[0]) {
         const userLocation = results[0].geometry.location;
+        console.log('User Location:', userLocation.lat(), userLocation.lng());
+
+        // Find nearest shelter
         let nearestShelter = null;
         let minDist = Infinity;
         shelters.forEach((shelter) => {
@@ -303,26 +404,36 @@ const FireStationsMap = () => {
           return;
         }
 
-        // Find nearest fire to avoid
-        let nearestFire = null;
-        let minFireDist = Infinity;
-        fireLocations.forEach(fire => {
+        console.log('Nearest Shelter:', nearestShelter);
+
+        // Find fires within ~10 km radius
+        let firesToAvoid = fireLocations.filter(fire => {
           const d = distance(userLocation.lat(), userLocation.lng(), fire.latitude, fire.longitude);
-          if (d < minFireDist) {
-            minFireDist = d;
-            nearestFire = fire;
-          }
+          return d <= 0.09;
         });
 
-        const avoidPolygon = nearestFire ? createAvoidPolygon(nearestFire) : null;
+        // Sort fires by proximity and limit to top 20
+        firesToAvoid.sort((a, b) => {
+          const da = distance(userLocation.lat(), userLocation.lng(), a.latitude, a.longitude);
+          const db = distance(userLocation.lat(), userLocation.lng(), b.latitude, b.longitude);
+          return da - db;
+        });
+        firesToAvoid = firesToAvoid.slice(0, 20);
+
+        // Create WKT avoidance polygons for limited fires
+        const avoidancePolygons = firesToAvoid.map(fire => createAvoidPolygonWKT(fire));
+        console.log('Avoidance Polygons:', avoidancePolygons);
 
         const origin = { lat: userLocation.lat(), lng: userLocation.lng() };
         const destination = nearestShelter;
 
         try {
-          const routeData = await fetchRouteAvoidingFires(origin, destination, avoidPolygon);
+          const routeData = await fetchRouteAvoidingFires(origin, destination, avoidancePolygons);
+          console.log('GraphHopper Route Data:', routeData);
+
           if (routeData.paths && routeData.paths.length > 0) {
             const path = routeData.paths[0].points.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }));
+            console.log('Route Path:', path);
 
             if (pathPolyline) {
               pathPolyline.setMap(null);
@@ -339,16 +450,78 @@ const FireStationsMap = () => {
 
             animateMarker(path);
           } else {
-            alert("No route found.");
+            alert("No route found. Please try a different address or check fire data.");
           }
         } catch (error) {
           console.error('Error fetching route:', error);
-          alert("Error fetching route.");
+          alert("Error fetching route. Please check the console for details.");
         }
       } else {
         alert('Geocode was not successful: ' + status);
       }
     });
+  };
+
+  // Simulate truck deployment using street routes with Nebius integration
+  const simulateTruckDeployment = async () => {
+    if (!map || !window.google) return;
+
+    // Call Nebius AI for suggestions (currently placeholder)
+    await getOptimalDeploymentsFromNebius(fireStations, fireLocations);
+
+    const truckRadius = 0.05;
+    const trucks = [];
+    fireStations.forEach(station => {
+      for (let i = 0; i < 3; i++) {
+        trucks.push({ station, assigned: false });
+      }
+    });
+
+    const sortedFires = [...fireLocations].sort((a, b) => b.bright_ti4 - a.bright_ti4);
+    const assignments = [];
+
+    for (let truck of trucks) {
+      let bestFire = null;
+      let minDist = Infinity;
+      for (let fire of sortedFires) {
+        if (fire.assigned) continue;
+        const stationLat = parseFloat(truck.station.the_geom.coordinates[1]);
+        const stationLng = parseFloat(truck.station.the_geom.coordinates[0]);
+        const dist = distance(stationLat, stationLng, fire.latitude, fire.longitude);
+        if (dist < minDist && dist <= truckRadius) {
+          minDist = dist;
+          bestFire = fire;
+        }
+      }
+      if (bestFire) {
+        truck.assigned = true;
+        bestFire.assigned = true;
+        assignments.push({ truck, fire: bestFire });
+      }
+    }
+
+    for (let {truck, fire} of assignments) {
+      const stationLat = parseFloat(truck.station.the_geom.coordinates[1]);
+      const stationLng = parseFloat(truck.station.the_geom.coordinates[0]);
+      const origin = { lat: stationLat, lng: stationLng };
+      const destination = { lat: fire.latitude, lng: fire.longitude };
+      try {
+        const routeData = await fetchRouteSimple(origin, destination);
+        if (routeData.paths && routeData.paths.length > 0) {
+          const path = routeData.paths[0].points.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }));
+          new window.google.maps.Polyline({
+            path,
+            geodesic: true,
+            strokeColor: '#00FF00',
+            strokeOpacity: 1.0,
+            strokeWeight: 3,
+            map,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching route for truck:', error);
+      }
+    }
   };
 
   return (
@@ -358,9 +531,10 @@ const FireStationsMap = () => {
           <div className="text-xl font-semibold">Loading Map...</div>
         </div>
       )}
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 5, background: 'white', padding: '5px' }}>
-        <input id="address-input" type="text" placeholder="Enter your address" style={{ width: '300px' }} />
-        <button onClick={handleSearch}>Find Nearest Shelter</button>
+      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 5, background: 'white', padding: '10px', borderRadius: '5px', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
+        <input id="address-input" type="text" placeholder="Enter your address" style={{ width: '250px', padding: '5px' }} />
+        <button onClick={handleSearch} style={{ marginLeft: '10px', padding: '5px 10px' }}>Find Nearest Shelter</button>
+        <button onClick={simulateTruckDeployment} style={{ marginLeft: '10px', padding: '5px 10px' }}>Deploy Trucks</button>
       </div>
       <div id="map" style={{ width: '100%', height: '100vh' }}></div>
     </div>
