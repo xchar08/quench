@@ -7,7 +7,6 @@ const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // Enable CORS & JSON body parsing
 app.use(cors());
@@ -18,8 +17,8 @@ puppeteer.use(StealthPlugin());
 
 // ENV vars
 const GOOGLE_GEOCODING_API_KEY = process.env.GOOGLE_GEOCODING_API_KEY;
-const GRAPH_HOPPER_API_KEY = process.env.GRAPH_HOPPER_API_KEY 
-  || process.env.VITE_GRAPH_HOPPER_API_KEY; // fallback if needed
+const GRAPH_HOPPER_API_KEY =
+  process.env.GRAPH_HOPPER_API_KEY || process.env.VITE_GRAPH_HOPPER_API_KEY; // fallback if needed
 
 // In-memory cache for shelters
 let cachedShelters = null;
@@ -53,11 +52,10 @@ app.get('/api/shelters', async (req, res) => {
     });
 
     const page = await browser.newPage();
-
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-      'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-      'Chrome/91.0.4472.124 Safari/537.36'
+        'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+        'Chrome/91.0.4472.124 Safari/537.36'
     );
 
     await page.setJavaScriptEnabled(true);
@@ -93,18 +91,20 @@ app.get('/api/shelters', async (req, res) => {
     });
 
     await browser.close();
-
     console.log('Scraped Shelters (Before Geocoding):', shelters);
 
-    // Optionally geocode any addresses if lat/long was invalid (usually not needed if table has lat/long)
+    // Optionally geocode addresses (usually not needed if table has lat/long)
     const geocodedShelters = await Promise.all(
       shelters.map(async (sh) => {
         const { streetAddress, city, state, zip } = sh;
         const fullAddress = `${streetAddress}, ${city}, ${state} ${zip}`;
         try {
-          const geoResp = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-            params: { address: fullAddress, key: GOOGLE_GEOCODING_API_KEY },
-          });
+          const geoResp = await axios.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            {
+              params: { address: fullAddress, key: GOOGLE_GEOCODING_API_KEY },
+            }
+          );
           if (geoResp.data.status === 'OK' && geoResp.data.results.length > 0) {
             const loc = geoResp.data.results[0].geometry.location;
             return { ...sh, latitude: loc.lat, longitude: loc.lng };
@@ -142,7 +142,9 @@ app.get('/api/shelters', async (req, res) => {
 app.post('/api/graphhopper-route', async (req, res) => {
   try {
     if (!GRAPH_HOPPER_API_KEY) {
-      return res.status(500).json({ error: 'Missing GraphHopper API key in .env.' });
+      return res
+        .status(500)
+        .json({ error: 'Missing GraphHopper API key in .env.' });
     }
 
     const ghUrl = `https://graphhopper.com/api/1/route?key=${GRAPH_HOPPER_API_KEY}`;
@@ -160,4 +162,6 @@ app.post('/api/graphhopper-route', async (req, res) => {
   }
 });
 
+// IMPORTANT: Do NOT listen on a port here in a serverless environment
+// Export the Express app instead
 module.exports = app;
