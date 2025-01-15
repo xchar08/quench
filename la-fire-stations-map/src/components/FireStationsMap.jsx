@@ -380,7 +380,7 @@ const FireStationsMap = () => {
                 const polygon = new window.google.maps.Polygon({
                   paths: polygonPath,
                   strokeColor: color,
-                  strokeOpacity: 0.3,
+                  strokeOpacity: 0.2,
                   strokeWeight: 2,
                   fillColor: color,
                   fillOpacity: 0.1,
@@ -397,20 +397,107 @@ const FireStationsMap = () => {
                 });
                 alertsRef.current.push(polygon);
 
-                // Spinning cat marker
-                const centroid = getPolygonCentroid(coords);
-                const catMarker = new window.google.maps.Marker({
-                  position: centroid,
-                  icon: {
-                    url: spinningCatGif,
-                    scaledSize: new window.google.maps.Size(35, 35),
-                  },
-                  map: showAlerts ? map : null, // Set map based on showAlerts
-                  optimized: false,
-                  title: `Alert: ${sev}`,
+                // Create a custom overlay class for the cat gif
+                class CatOverlay extends window.google.maps.OverlayView {
+                  constructor(bounds, paths) {
+                    super();
+                    this.bounds = bounds;
+                    this.paths = paths;
+                  }
+
+                  onAdd() {
+                    const div = document.createElement('div');
+                    div.style.position = 'absolute';
+                    div.style.overflow = 'hidden';
+
+                    // Create SVG for clipping
+                    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('style', 'position: absolute; width: 100%; height: 100%;');
+                    
+                    // Create clipPath
+                    const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+                    clipPath.setAttribute('id', `clip-${Math.random().toString(36).substr(2, 9)}`);
+                    
+                    // Create polygon for clipping
+                    const clipPolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    
+                    // Create image that fills the div
+                    const img = document.createElement('img');
+                    img.src = spinningCatGif;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'cover';
+                    img.style.clipPath = `url(#${clipPath.getAttribute('id')})`;
+
+                    clipPath.appendChild(clipPolygon);
+                    svg.appendChild(clipPath);
+                    div.appendChild(svg);
+                    div.appendChild(img);
+
+                    this.div = div;
+                    const panes = this.getPanes();
+                    panes.overlayLayer.appendChild(div);
+                  }
+
+                  draw() {
+                    const overlayProjection = this.getProjection();
+                    
+                    // Convert bounds to pixel coordinates
+                    const sw = overlayProjection.fromLatLngToDivPixel(this.bounds.getSouthWest());
+                    const ne = overlayProjection.fromLatLngToDivPixel(this.bounds.getNorthEast());
+
+                    const div = this.div;
+                    div.style.left = sw.x + 'px';
+                    div.style.top = ne.y + 'px';
+                    div.style.width = (ne.x - sw.x) + 'px';
+                    div.style.height = (sw.y - ne.y) + 'px';
+
+                    // Update clip path points
+                    const points = this.paths.map(path => {
+                      const pixel = overlayProjection.fromLatLngToDivPixel(path);
+                      return `${pixel.x - sw.x},${pixel.y - ne.y}`;
+                    }).join(' ');
+
+                    const clipPolygon = div.querySelector('polygon');
+                    clipPolygon.setAttribute('points', points);
+                  }
+
+                  onRemove() {
+                    if (this.div) {
+                      this.div.parentNode.removeChild(this.div);
+                      this.div = null;
+                    }
+                  }
+                }
+
+                // Store polygon bounds and paths
+                const bounds = new window.google.maps.LatLngBounds();
+                polygonPath.forEach(path => bounds.extend(path));
+
+                // Add click listeners
+                polygon.addListener('click', (e) => {
+                  // Show info window
+                  infoWindow.setPosition(e.latLng);
+                  infoWindow.open(map);
+                  
+                  if (showAlerts) {
+                    // Remove any existing overlays
+                    dangerMarkersRef.current.forEach(overlay => overlay.setMap(null));
+                    
+                    // Create and add new overlay
+                    const catOverlay = new CatOverlay(bounds, polygonPath);
+                    catOverlay.setMap(map);
+                    
+                    // Store reference to current overlay
+                    dangerMarkersRef.current = [catOverlay];
+                  }
                 });
-                catMarker.addListener('click', () => infoWindow.open(map, catMarker));
-                dangerMarkersRef.current.push(catMarker);
+                
+                // Add listener to hide overlay when info window closes
+                infoWindow.addListener('closeclick', () => {
+                  dangerMarkersRef.current.forEach(overlay => overlay.setMap(null));
+                  dangerMarkersRef.current = [];
+                });
               }
             } catch (er) {
               console.error('Error fetching NOAA zone data:', er);
@@ -934,7 +1021,7 @@ const FireStationsMap = () => {
         </div>
 
         {/* Toggles */}
-        <div className="space-y-1 pt-2">
+        <div className="space-y-1 pt-2 pb-2">
           <label className="flex items-center space-x-2">
             <input
               type="checkbox"
@@ -977,6 +1064,24 @@ const FireStationsMap = () => {
             />
             <span>Show NOAA Alerts</span>
           </label>
+        </div>
+
+        {/* Info Icon with Hover */}
+        <div className="relative group">
+          <div className="cursor-help text-gray-500 hover:text-gray-700">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+          </div>
+          <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block w-64 bg-black bg-opacity-75 text-white text-sm rounded-lg p-2">
+            <p className="mb-1"><strong>Data Sources:</strong></p>
+            <ul className="list-disc list-inside">
+              <li>Fire Stations: LA City Data</li>
+              <li>Active Fires: NASA FIRMS</li>
+              <li>Weather Alerts: NOAA NWS</li>
+              <li>Routing: GraphHopper</li>
+            </ul>
+          </div>
         </div>
       </div>
 
