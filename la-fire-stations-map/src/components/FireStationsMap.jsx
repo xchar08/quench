@@ -4,22 +4,36 @@ import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
 import Papa from 'papaparse';
 
-
-
 const FireStationsMap = () => {
   const [fireStations, setFireStations] = useState([]);
   const [shelters, setShelters] = useState([]);
   const [loading, setLoading] = useState(true);
-  const mapRef = useRef(null); // Reference to the map div
-  const mapInstanceRef = useRef(null); // Reference to the map instance
+  const [map, setMap] = useState(null);
   const fireMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
-  const fireLocMarkersRef = useRef([]);
+  const heatmapRef = useRef(null);
   const [fireLocations, setFireLocations] = useState([]);
 
   // Retrieve API key and Map ID from environment variables
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
+
+  // Parse CSV and return an array of fire location objects with temperature data
+  const csvToJson = (csv) => {
+    const results = Papa.parse(csv, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true,
+    });
+    const locations = results.data.map((fire) => ({
+      latitude: fire.latitude,
+      longitude: fire.longitude,
+      bright_ti4: fire.bright_ti4,
+      bright_ti5: fire.bright_ti5,
+    }));
+    console.log("Parsed fire locations:", locations);
+    return locations;
+  };
 
   // Fetch Fire Stations Data
   useEffect(() => {
@@ -31,7 +45,6 @@ const FireStationsMap = () => {
         console.error('Error fetching fire stations data:', error);
       }
     };
-
     fetchFireStations();
   }, []);
 
@@ -40,55 +53,34 @@ const FireStationsMap = () => {
     const fetchShelters = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/shelters'); // Update with your backend URL
-        console.log('Fetched shelters data:', response.data); // Debugging log
+        console.log('Fetched shelters data:', response.data);
         setShelters(response.data);
       } catch (error) {
         console.error('Error fetching shelters data:', error);
       }
     };
-
     fetchShelters();
   }, []);
-// get fire location data from nasa firms
-const csvToJson = (csv) => {
-  return Papa.parse(csv, {
-    header: true, // First row is treated as the header
-    skipEmptyLines: true, // Skip empty rows
-    dynamicTyping: true, // Convert numbers to proper numeric types
-    complete: (results) => {
-      // Convert parsed data to the required format
 
-      const locations = results.data.map((fire) => ({
-        lat: fire.latitude,
-        lng: fire.longitude,
-        brightness: fire.bright_ti4,
-      }));
-      console.log("done", locations)
-
-    },
-  })
-};
-  // fetch fire locations
+  // Fetch fire locations data
   useEffect(() => {
     const fetchFireData = async () => {
       try {
         const response = await fetch(
-          'https://firms.modaps.eosdis.nasa.gov/api/area/csv/d3ff7053e821cf760bf415e628a9dce7/VIIRS_SNPP_NRT/-124,32,-113,42/1/2025-01-14'
+          'https://firms.modaps.eosdis.nasa.gov/api/area/csv/d3ff7053e821cf760bf415e628a9dce7/VIIRS_SNPP_NRT/-124,32,-113,42/10/2025-01-01'
         );
         const data = await response.text();
-        const jsonData = csvToJson(data);
-        console.log('Fetched fires data:', jsonData); // Debugging log
-        setFireLocations(jsonData.data);
-        
+        const locations = csvToJson(data);
+        console.log('Fetched fires data:', locations);
+        setFireLocations(locations);
       } catch (error) {
         console.error('Error fetching fire data:', error);
       }
     };
-  
     fetchFireData();
   }, []);
 
-  // Initialize Google Maps
+  // Initialize Google Maps and store in state
   useEffect(() => {
     if (!googleMapsApiKey) {
       console.error('Google Maps API key is missing.');
@@ -99,7 +91,7 @@ const csvToJson = (csv) => {
     const loader = new Loader({
       apiKey: googleMapsApiKey,
       version: 'weekly',
-      libraries: ['marker'],
+      libraries: ['marker', 'visualization'],  // Include visualization library for heatmap
       mapId: mapId || undefined,
     });
 
@@ -108,14 +100,14 @@ const csvToJson = (csv) => {
     loader
       .load()
       .then((google) => {
-        if (isMounted && mapRef.current) {
+        if (isMounted) {
           const center = { lat: 34.0522, lng: -118.2437 }; // Los Angeles coordinates
-          const map = new google.maps.Map(mapRef.current, {
+          const newMap = new google.maps.Map(document.getElementById('map'), {
             center,
             zoom: 10,
             mapId: mapId || undefined,
           });
-          mapInstanceRef.current = map;
+          setMap(newMap);
           setLoading(false);
         }
       })
@@ -140,10 +132,10 @@ const csvToJson = (csv) => {
     return div;
   };
 
-  // Add Fire Station Markers to the Map
+  // Add Fire Station Markers to the Map (red)
   useEffect(() => {
-    if (mapInstanceRef.current && fireStations.length > 0) {
-      // Clear existing fire markers
+    if (map && fireStations.length > 0) {
+      // Clear existing fire station markers
       fireMarkersRef.current.forEach((marker) => marker.setMap(null));
       fireMarkersRef.current = [];
 
@@ -155,18 +147,15 @@ const csvToJson = (csv) => {
         const latNum = parseFloat(lat);
         const lngNum = parseFloat(lng);
 
-        // Create custom marker content
         const markerElement = createMarkerContent('red');
 
-        // Instantiate AdvancedMarkerElement
         const marker = new google.maps.marker.AdvancedMarkerElement({
-          map: mapInstanceRef.current,
+          map,
           position: { lat: latNum, lng: lngNum },
           title: shp_addr,
           content: markerElement,
         });
 
-        // Create an InfoWindow for Fire Station
         const infoWindow = new google.maps.InfoWindow({
           content: `
             <div style="padding: 10px; font-family: Arial, sans-serif;">
@@ -176,20 +165,18 @@ const csvToJson = (csv) => {
           `,
         });
 
-        // Add click listener using google.maps.event.addListener
         google.maps.event.addListener(marker, 'click', () => {
-          infoWindow.open(mapInstanceRef.current, marker);
+          infoWindow.open(map, marker);
         });
 
-        // Store marker reference
         fireMarkersRef.current.push(marker);
       });
     }
-  }, [mapInstanceRef.current, fireStations]);
+  }, [map, fireStations]);
 
-  // Add Shelter Markers to the Map
+  // Add Shelter Markers to the Map (blue)
   useEffect(() => {
-    if (mapInstanceRef.current && shelters.length > 0) {
+    if (map && shelters.length > 0) {
       // Clear existing shelter markers
       shelterMarkersRef.current.forEach((marker) => marker.setMap(null));
       shelterMarkersRef.current = [];
@@ -203,24 +190,20 @@ const csvToJson = (csv) => {
 
         const latNum = parseFloat(latitude);
         const lngNum = parseFloat(longitude);
-
         if (isNaN(latNum) || isNaN(lngNum)) {
           console.warn('Invalid coordinates for shelter:', shelter);
           return;
         }
 
-        // Create custom marker content
         const markerElement = createMarkerContent('blue');
 
-        // Instantiate AdvancedMarkerElement
         const marker = new google.maps.marker.AdvancedMarkerElement({
-          map: mapInstanceRef.current,
+          map,
           position: { lat: latNum, lng: lngNum },
           title: name,
           content: markerElement,
         });
 
-        // Create an InfoWindow for Shelter
         const infoWindow = new google.maps.InfoWindow({
           content: `
             <div style="padding: 10px; font-family: Arial, sans-serif;">
@@ -230,71 +213,61 @@ const csvToJson = (csv) => {
           `,
         });
 
-        // Add click listener using google.maps.event.addListener
         google.maps.event.addListener(marker, 'click', () => {
-          infoWindow.open(mapInstanceRef.current, marker);
+          infoWindow.open(map, marker);
         });
 
-        // Store marker reference
         shelterMarkersRef.current.push(marker);
       });
     }
-  }, [mapInstanceRef.current, shelters]);
+  }, [map, shelters]);
 
-// display fires
+  // Create Heatmap for Fires based on brightness values
   useEffect(() => {
-    if (mapInstanceRef.current && fireLocations.length > 0) {
-      // Clear existing fire markers
-      fireLocMarkersRef.current.forEach((marker) => marker.setMap(null));
-      fireLocMarkersRef.current = [];
+    if (map && fireLocations.length > 0) {
+      // Remove previous heatmap if exists
+      if (heatmapRef.current) {
+        heatmapRef.current.setMap(null);
+      }
 
-      fireLocations.forEach((fire) => {
-        const { latitude, longitude, brightness } = fire;
-        if (!latitude || !longitude) {
-          console.warn('fire missing coordinates:', fire);
-          return;
-        }
+      // Prepare heatmap data points with weights based on bright_ti4
+      const heatmapData = fireLocations
+        .map((fire) => {
+          const { latitude, longitude, bright_ti4 } = fire;
+          if (!latitude || !longitude) return null;
+          const latNum = parseFloat(latitude);
+          const lngNum = parseFloat(longitude);
+          if (isNaN(latNum) || isNaN(lngNum)) return null;
+          return {
+            location: new google.maps.LatLng(latNum, lngNum),
+            weight: bright_ti4 || 0, // use bright_ti4 as weight
+          };
+        })
+        .filter(Boolean);
 
-        const latNum = parseFloat(latitude);
-        const lngNum = parseFloat(longitude);
-
-        if (isNaN(latNum) || isNaN(lngNum)) {
-          console.warn('Invalid coordinates for fire:', fire);
-          return;
-        }
-
-        // Create custom marker content
-        const markerElement = createMarkerContent('green');
-
-        // Instantiate AdvancedMarkerElement
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-          map: mapInstanceRef.current,
-          position: { lat: latNum, lng: lngNum },
-          title: name,
-          content: markerElement,
-        });
-
-        // Create an InfoWindow for Shelter
-        // const infoWindow = new google.maps.InfoWindow({
-        //   content: `
-        //     <div style="padding: 10px; font-family: Arial, sans-serif;">
-        //       <h2 style="font-size: 16px; font-weight: bold;">${name}</h2>
-        //       <p>${streetAddress}, ${city}, ${state} ${zip}</p>
-        //     </div>
-        //   `,
-        // });
-
-        // Add click listener using google.maps.event.addListener
-        google.maps.event.addListener(marker, 'click', () => {
-          infoWindow.open(mapInstanceRef.current, marker);
-        });
-
-        // Store marker reference
-        fireLocMarkersRef.current.push(marker);
+      heatmapRef.current = new google.maps.visualization.HeatmapLayer({
+        data: heatmapData,
+        map,
+        radius: 20, // adjust radius as needed
+        gradient: [
+          'rgba(0, 255, 255, 0)',    // transparent
+          'rgba(0, 255, 255, 1)',    // cyan
+          'rgba(0, 191, 255, 1)',    
+          'rgba(0, 127, 255, 1)',    
+          'rgba(0, 63, 255, 1)',     
+          'rgba(0, 0, 255, 1)',      // blue
+          'rgba(63, 0, 255, 1)',     
+          'rgba(127, 0, 255, 1)',    
+          'rgba(191, 0, 255, 1)',    
+          'rgba(255, 0, 255, 1)',    
+          'rgba(255, 0, 191, 1)',    
+          'rgba(255, 0, 127, 1)',    
+          'rgba(255, 0, 63, 1)',     
+          'rgba(255, 0, 0, 1)'       // red
+        ],
       });
     }
-  }, [mapInstanceRef.current, fireLocations]);
-
+  }, [map, fireLocations]);
 
   return (
     <div className="relative">
@@ -303,7 +276,7 @@ const csvToJson = (csv) => {
           <div className="text-xl font-semibold">Loading Map...</div>
         </div>
       )}
-      <div ref={mapRef} style={{ width: '100%', height: '100vh' }}></div>
+      <div id="map" style={{ width: '100%', height: '100vh' }}></div>
     </div>
   );
 };
