@@ -6,7 +6,7 @@ import Papa from 'papaparse';
 import * as tf from '@tensorflow/tfjs';
 import OpenAI from 'openai';
 
-// IMAGE IMPORTS (adjust to your actual paths)
+// IMAGE IMPORTS (adjust to your paths)
 import hydrantpng from '../assets/firehydrant.png';
 import firetruckPng from '../assets/firetruck.png';
 import shelterPng from '../assets/shelter.png';
@@ -17,17 +17,33 @@ import spinningCatGif from '../assets/spinningcat.gif';
 import chatbotImg1 from '../assets/chatbot/bot1.png';
 import chatbotImg2 from '../assets/chatbot/bot2.png';
 
-// ENV KEYS
+// ENV (from your .env via Vite)
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
-const GRAPH_HOPPER_API_KEY = import.meta.env.VITE_GRAPH_HOPPER_API_KEY;
 const NEBIUS_API_KEY = import.meta.env.VITE_NEBIUS_API_KEY;
 
 /**
- * 1) NEBIUS AI Chatbot with Tailwind
- * 2) Bubbled chat, gradient header, etc.
+ * createCirclePolygonGeoJson:
+ *  Generates a ring of lat/lng points (forming a circle) for "avoid_polygons".
  */
-const QuirkyInsuranceChatbot = () => {
+function createCirclePolygonGeoJson(lat, lng, radiusKm = 10, sides = 36) {
+  // ~1 deg lat ~ 111 km
+  const degRadius = radiusKm / 111;
+  const coords = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = (2 * Math.PI * i) / sides;
+    const dx = degRadius * Math.cos(angle);
+    const dy = degRadius * Math.sin(angle);
+    coords.push([lng + dx, lat + dy]);
+  }
+  coords.push(coords[0]); // close ring
+  return coords;
+}
+
+/** 
+ * QUIRKY INSURANCE CHATBOT (Burnie) with Nebius AI
+ */
+function QuirkyInsuranceChatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     {
@@ -59,14 +75,15 @@ const QuirkyInsuranceChatbot = () => {
       const response = await nebiusClient.chat.completions.create({
         max_tokens: 150,
         temperature: 0.7,
-        model: "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        model: 'meta-llama/Meta-Llama-3.1-70B-Instruct',
         messages: [
           {
-            role: "system",
-            content: "You are Burnie, a quirky 2025 CA wildfire insurance & safety chatbot with puns & disclaimers."
+            role: 'system',
+            content:
+              'You are Burnie, a quirky 2025 CA wildfire insurance & safety chatbot with puns & disclaimers.'
           },
           {
-            role: "user",
+            role: 'user',
             content: userMsg
           }
         ]
@@ -77,7 +94,7 @@ const QuirkyInsuranceChatbot = () => {
       console.error('Nebius AI error:', err);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: "Burnie had trouble connecting to Nebius. Sorry!" }
+        { role: 'assistant', content: 'Burnie had trouble connecting to Nebius. Sorry!' }
       ]);
     }
   };
@@ -114,7 +131,7 @@ const QuirkyInsuranceChatbot = () => {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto bg-gray-50 p-2">
             {messages.map((msg, i) => {
-              const isBurnie = (msg.role === 'assistant' || msg.role === 'system');
+              const isBurnie = msg.role === 'assistant' || msg.role === 'system';
               return (
                 <div
                   key={i}
@@ -124,17 +141,13 @@ const QuirkyInsuranceChatbot = () => {
                 >
                   <div
                     className={`max-w-[70%] px-3 py-2 rounded-lg shadow text-sm ${
-                      isBurnie
-                        ? 'bg-orange-100 text-orange-900'
-                        : 'bg-gray-200 text-gray-800'
+                      isBurnie ? 'bg-orange-100 text-orange-900' : 'bg-gray-200 text-gray-800'
                     }`}
                   >
                     <span className="font-semibold block mb-1">
                       {isBurnie ? 'Burnie' : 'You'}
                     </span>
-                    <span className="whitespace-pre-line break-words">
-                      {msg.content}
-                    </span>
+                    <span className="whitespace-pre-line break-words">{msg.content}</span>
                   </div>
                 </div>
               );
@@ -147,7 +160,9 @@ const QuirkyInsuranceChatbot = () => {
               type="text"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSend(); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSend();
+              }}
               placeholder="Ask away..."
               className="flex-1 border border-gray-300 rounded px-2 py-1 mr-2 focus:outline-none focus:ring-2 focus:ring-orange-400"
             />
@@ -162,19 +177,17 @@ const QuirkyInsuranceChatbot = () => {
       )}
     </div>
   );
-};
+}
 
 /**
- * FireStationsMap
- * Merges:
- * - NASA FIRMS (Fires) => Heatmap
+ * FIRESTATIONSMAP
+ * - NASA FIRMS => Heatmap
  * - NOAA => polygons + spinning cat
  * - Fire Stations, Shelters, Hydrants => toggles
- * - Deploy trucks + extinguish
- * - Find Nearest Shelter => Avoid ALL fires
- * - TF Model training
- * - Tailwind UI
- * - Nebius Chatbot
+ * - Deploy trucks (with firetruck animation)
+ * - Find Nearest Shelter => Avoid top 50 brightest fires
+ * - TF model training
+ * - GraphHopper calls => /api/graphhopper-route proxy to avoid CORS
  */
 const FireStationsMap = () => {
   const [loading, setLoading] = useState(true);
@@ -191,13 +204,14 @@ const FireStationsMap = () => {
   // Scoreboard
   const [distanceTraveled, setDistanceTraveled] = useState(null);
   const [extinguishedCount, setExtinguishedCount] = useState(0);
+  const [activeFires, setActiveFires] = useState(0);
 
   // Toggles
   const [showFireStations, setShowFireStations] = useState(true);
   const [showShelters, setShowShelters] = useState(true);
   const [showHydrants, setShowHydrants] = useState(true);
 
-  // TF Model
+  // TF model
   const [model, setModel] = useState(null);
 
   // Refs
@@ -206,17 +220,17 @@ const FireStationsMap = () => {
   const fireStationMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
   const hydrantMarkersRef = useRef([]);
-  const truckMarkersRef = useRef([]);
   const alertsRef = useRef([]);
   const dangerMarkersRef = useRef([]);
+  const truckMarkersRef = useRef([]);
   const [pathPolyline, setPathPolyline] = useState(null);
 
-  // ENV
-  const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
-  const GRAPH_HOPPER_API_KEY = import.meta.env.VITE_GRAPH_HOPPER_API_KEY;
+  // Active Fires => length of fireLocations
+  useEffect(() => {
+    setActiveFires(fireLocations.length);
+  }, [fireLocations]);
 
-  // ============== TF MODEL ==============
+  // ============== TF MODEL (dummy) ==============
   useEffect(() => {
     const trainModel = async () => {
       try {
@@ -226,19 +240,20 @@ const FireStationsMap = () => {
         m.add(tf.layers.dense({ units: 2, activation: 'softmax' }));
         m.compile({ optimizer: 'adam', loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
 
-        const xs = tf.randomNormal([120, 3]);
-        const ys = tf.oneHot(tf.randomUniform([120], 0, 2, 'int32'), 2);
+        const xs = tf.randomNormal([60, 3]);
+        const ys = tf.oneHot(tf.randomUniform([60], 0, 2, 'int32'), 2);
 
         await m.fit(xs, ys, {
           epochs: 5,
           validationSplit: 0.1,
           callbacks: {
-            onEpochEnd: (ep, logs) =>
-              console.log(`Epoch ${ep}: loss=${logs.loss.toFixed(4)}, acc=${logs.acc.toFixed(4)}`)
-          }
+            onEpochEnd: (ep, logs) => {
+              console.log(`Epoch ${ep}: loss=${logs.loss.toFixed(3)}, acc=${logs.acc.toFixed(3)}`);
+            },
+          },
         });
         setModel(m);
-        console.log("Dummy model trained successfully.");
+        console.log('Dummy model trained successfully.');
       } catch (err) {
         console.error('Error training TF model:', err);
       }
@@ -260,7 +275,8 @@ const FireStationsMap = () => {
       mapId: mapId || undefined,
     });
 
-    loader.load()
+    loader
+      .load()
       .then((google) => {
         const newMap = new google.maps.Map(document.getElementById('map'), {
           center: { lat: 34.0522, lng: -118.2437 },
@@ -282,36 +298,10 @@ const FireStationsMap = () => {
     }
   }, [map]);
 
-  // NOAA Summaries => spinning cat polygons
+  // NOAA Summaries => optional
   const summarizeText = async (text) => {
-    if (!text) return '';
-    // either call Nebius or skip
-    try {
-      const openaiClient = new OpenAI({
-        baseURL: 'https://api.studio.nebius.ai/v1/',
-        apiKey: NEBIUS_API_KEY,
-        dangerouslyAllowBrowser: true,
-      });
-      const resp = await openaiClient.chat.completions.create({
-        model: "meta-llama/Meta-Llama-3.1-70B-Instruct",
-        max_tokens: 100,
-        temperature: 0.5,
-        messages: [
-          {
-            role: "system",
-            content: "You are an AI specialized in summarizing hazard alerts."
-          },
-          {
-            role: "user",
-            content: `Summarize in 1-2 sentences:\n\n${text}`
-          }
-        ]
-      });
-      return resp.choices[0].message.content;
-    } catch (err) {
-      console.error('Error summarizing NOAA text:', err);
-      return text;
-    }
+    // skip for brevity or use Nebius
+    return text || '';
   };
 
   // NOAA
@@ -322,10 +312,10 @@ const FireStationsMap = () => {
         const resp = await axios.get('https://api.weather.gov/alerts/active?area=CA');
         const severe = resp.data.features.filter((f) => {
           const sev = f.properties.severity;
-          return (sev==='Severe' || sev==='Warning' || sev==='Advisory' || sev==='Watch');
+          return sev === 'Severe' || sev === 'Warning' || sev === 'Advisory' || sev === 'Watch';
         });
         for (let a of severe) {
-          const summary = await summarizeText(a.properties.description||'');
+          const summary = await summarizeText(a.properties.description || '');
           a.properties.summary = summary;
         }
         setAlerts(severe);
@@ -338,34 +328,28 @@ const FireStationsMap = () => {
     fetchNOAAAlerts();
   }, []);
 
-  // NOAA => polygons + cat
   const getAlertColor = (severity) => {
     switch (severity) {
-      case 'Severe': return 'red';
-      case 'Warning': return 'orange';
-      case 'Watch': return 'blue';
-      case 'Advisory': return 'yellow';
-      default: return 'green';
-    }
-  };
-  const severityCatSize = (severity, google) => {
-    if (!google) return null;
-    switch (severity) {
-      case 'Severe': return new google.maps.Size(45,45);
-      case 'Warning': return new google.maps.Size(35,35);
-      case 'Watch': return new google.maps.Size(30,30);
-      case 'Advisory': return new google.maps.Size(25,25);
-      default: return new google.maps.Size(20,20);
+      case 'Severe':
+        return 'red';
+      case 'Warning':
+        return 'orange';
+      case 'Watch':
+        return 'blue';
+      case 'Advisory':
+        return 'yellow';
+      default:
+        return 'green';
     }
   };
   const getPolygonCentroid = (coords) => {
-    let latSum=0, lngSum=0;
+    let latSum = 0, lngSum = 0;
     coords.forEach(([ln, la]) => {
-      latSum+=la; lngSum+=ln;
+      latSum += la;
+      lngSum += ln;
     });
-    return { lat: latSum/coords.length, lng: lngSum/coords.length };
+    return { lat: latSum / coords.length, lng: lngSum / coords.length };
   };
-
   useEffect(() => {
     if (!map || !window.google || alertsLoading || !alerts.length) return;
 
@@ -373,14 +357,19 @@ const FireStationsMap = () => {
       const sev = alert.properties.severity || 'Unknown';
       const color = getAlertColor(sev);
       const zones = alert.properties.affectedZones;
-      if (zones && zones.length>0) {
+      if (zones && zones.length > 0) {
         zones.forEach(async (zoneUrl) => {
           try {
             const resp = await axios.get(zoneUrl);
             const zoneData = resp.data;
-            if (zoneData.geometry && zoneData.geometry.type==='Polygon' && zoneData.geometry.coordinates) {
-              const coords = zoneData.geometry.coordinates[0]; 
+            if (
+              zoneData.geometry &&
+              zoneData.geometry.type === 'Polygon' &&
+              zoneData.geometry.coordinates
+            ) {
+              const coords = zoneData.geometry.coordinates[0];
               const polygonPath = coords.map(([ln, la]) => ({ lat: la, lng: ln }));
+
               const polygon = new window.google.maps.Polygon({
                 paths: polygonPath,
                 strokeColor: color,
@@ -390,30 +379,31 @@ const FireStationsMap = () => {
                 fillOpacity: 0.1,
                 map,
               });
-              const infoText = alert.properties.summary || alert.properties.description||'';
+
+              const infoText = alert.properties.summary || alert.properties.description || '';
               const infoWindow = new window.google.maps.InfoWindow({
-                content: `<div class="p-2"><p class="font-bold" style="color:${color}">${alert.properties.headline||'Hazard Alert'}</p><p>${infoText}</p></div>`,
+                content: `<div><p style="color:${color}">${alert.properties.headline || 'Hazard Alert'}</p><p>${infoText}</p></div>`,
               });
-              polygon.addListener('click',(e)=>{
+              polygon.addListener('click', (e) => {
                 infoWindow.setPosition(e.latLng);
                 infoWindow.open(map);
               });
-              if (!alertsRef.current) alertsRef.current=[];
+              if (!alertsRef.current) alertsRef.current = [];
               alertsRef.current.push(polygon);
 
-              // spinning cat
+              // spinning cat marker
               const centroid = getPolygonCentroid(coords);
               const catMarker = new window.google.maps.Marker({
                 position: centroid,
                 icon: {
                   url: spinningCatGif,
-                  scaledSize: severityCatSize(sev, window.google),
+                  scaledSize: new window.google.maps.Size(35, 35),
                 },
                 map,
-                optimized: false, // for .gif to animate
+                optimized: false,
                 title: `Alert: ${sev}`,
               });
-              catMarker.addListener('click', ()=> infoWindow.open(map, catMarker));
+              catMarker.addListener('click', () => infoWindow.open(map, catMarker));
               dangerMarkersRef.current.push(catMarker);
             }
           } catch (er) {
@@ -424,18 +414,17 @@ const FireStationsMap = () => {
     });
   }, [map, alerts, alertsLoading]);
 
-  // NASA FIRMS
+  // NASA FIRMS => fetch fires
   const csvToJson = (csv) => {
     const parsed = Papa.parse(csv, {
       header: true,
       skipEmptyLines: true,
       dynamicTyping: true,
     });
-    return parsed.data.map((fire)=>({
+    return parsed.data.map((fire) => ({
       latitude: parseFloat(fire.latitude),
       longitude: parseFloat(fire.longitude),
       bright_ti4: parseFloat(fire.bright_ti4),
-      bright_ti5: parseFloat(fire.bright_ti5),
     }));
   };
   useEffect(() => {
@@ -445,74 +434,76 @@ const FireStationsMap = () => {
           'https://firms.modaps.eosdis.nasa.gov/api/area/csv/d3ff7053e821cf760bf415e628a9dce7/VIIRS_SNPP_NRT/-124,32,-113,42/10/2025-01-01'
         );
         const text = await resp.text();
-        const fires = csvToJson(text);
-        setFireLocations(fires);
+        const fires = csvToJson(text) || [];
+        setFireLocations(Array.isArray(fires) ? fires : []);
       } catch (err) {
         console.error('Error fetching NASA FIRMS data:', err);
+        setFireLocations([]);
       }
     };
     fetchFires();
   }, []);
 
-  // Fire Station
+  // Fire Stations
   useEffect(() => {
     const fetchStations = async () => {
       try {
         const resp = await axios.get('https://data.lacity.org/resource/rnb4-daiw.json');
-        setFireStations(resp.data);
+        setFireStations(resp.data || []);
       } catch (err) {
         console.error('Error fetching LA Fire Stations:', err);
+        setFireStations([]);
       }
     };
     fetchStations();
   }, []);
 
-  // Shelters
+  // Shelters => from local Node server
   useEffect(() => {
     const fetchShelters = async () => {
       try {
         const resp = await axios.get('http://localhost:5000/api/shelters');
-        setShelters(resp.data);
+        setShelters(resp.data || []);
       } catch (err) {
         console.error('Error fetching shelters:', err);
+        setShelters([]);
       }
     };
     fetchShelters();
   }, []);
 
-  // Hydrants
+  // Hydrants => local JSON
   useEffect(() => {
     const fetchHydrants = async () => {
       try {
         const resp = await fetch('/data/Hydrants.json');
         const jData = await resp.json();
         if (jData && jData.features) {
-          const arr = jData.features.map((feat)=>({
+          const arr = jData.features.map((feat) => ({
             objectId: feat.attributes?.OBJECTID,
             sizeCode: feat.attributes?.SIZE_CODE,
-            makeDesc: feat.attributes?.MAKE_DESCRIPTION,
-            mainSize: feat.attributes?.MAIN_SIZE,
-            tooltip: feat.attributes?.TOOLTIP,
-            url: feat.attributes?.NLA_URL,
             latitude: feat.geometry?.y,
             longitude: feat.geometry?.x,
           }));
           setHydrants(arr);
+        } else {
+          setHydrants([]);
         }
       } catch (err) {
         console.error('Error fetching hydrants:', err);
+        setHydrants([]);
       }
     };
     fetchHydrants();
   }, []);
 
-  // Show/hide fire station markers
+  // Fire Stations => Markers
   useEffect(() => {
     if (!map || !window.google || !fireStations.length) return;
-    fireStationMarkersRef.current.forEach((m)=> m.setMap(null));
-    fireStationMarkersRef.current=[];
+    fireStationMarkersRef.current.forEach((m) => m.setMap(null));
+    fireStationMarkersRef.current = [];
 
-    fireStations.forEach((station)=> {
+    fireStations.forEach((station) => {
       const { the_geom, shp_addr, address } = station;
       if (!the_geom || !the_geom.coordinates) return;
       const [lng, lat] = the_geom.coordinates;
@@ -520,335 +511,352 @@ const FireStationsMap = () => {
       if (isNaN(latNum) || isNaN(lngNum)) return;
 
       const marker = new window.google.maps.Marker({
-        position:{ lat:latNum, lng:lngNum },
-        icon:{
+        position: { lat: latNum, lng: lngNum },
+        icon: {
           url: firestationPng,
-          scaledSize: new window.google.maps.Size(30,30),
+          scaledSize: new window.google.maps.Size(30, 30),
         },
-        title: shp_addr,
+        title: shp_addr || 'Fire Station',
       });
       if (showFireStations) marker.setMap(map);
 
       const infoWindow = new window.google.maps.InfoWindow({
-        content:`<div><h2>${shp_addr}</h2><p>${address}</p></div>`,
+        content: `<div><h2>${shp_addr}</h2><p>${address}</p></div>`,
       });
-      marker.addListener('click', ()=> infoWindow.open(map, marker));
+      marker.addListener('click', () => infoWindow.open(map, marker));
       fireStationMarkersRef.current.push(marker);
     });
   }, [map, fireStations, showFireStations]);
 
-  // Shelters
+  // Shelters => Markers
   useEffect(() => {
     if (!map || !window.google || !shelters.length) return;
-    shelterMarkersRef.current.forEach((m)=> m.setMap(null));
-    shelterMarkersRef.current=[];
+    shelterMarkersRef.current.forEach((m) => m.setMap(null));
+    shelterMarkersRef.current = [];
 
-    shelters.forEach((shel)=> {
-      const { latitude, longitude, name, streetAddress, city, state, zip }=shel;
-      if(!latitude||!longitude) return;
-      const latNum= parseFloat(latitude), lngNum=parseFloat(longitude);
-      if (isNaN(latNum)||isNaN(lngNum)) return;
+    shelters.forEach((sh) => {
+      const { latitude, longitude, name, streetAddress, city, state, zip } = sh;
+      if (!latitude || !longitude) return;
+      const latNum = parseFloat(latitude), lngNum = parseFloat(longitude);
+      if (isNaN(latNum) || isNaN(lngNum)) return;
 
-      const marker= new window.google.maps.Marker({
-        position:{ lat:latNum, lng:lngNum},
-        icon:{
+      const marker = new window.google.maps.Marker({
+        position: { lat: latNum, lng: lngNum },
+        icon: {
           url: shelterPng,
-          scaledSize:new window.google.maps.Size(28,28),
+          scaledSize: new window.google.maps.Size(28, 28),
         },
-        title: name,
+        title: name || 'Shelter',
       });
       if (showShelters) marker.setMap(map);
 
       const infoWindow = new window.google.maps.InfoWindow({
-        content:`<div><h3>${name}</h3><p>${streetAddress}, ${city}, ${state} ${zip}</p></div>`,
+        content: `<div>
+          <h3>${name}</h3>
+          <p>${streetAddress}, ${city}, ${state} ${zip}</p>
+        </div>`,
       });
-      marker.addListener('click',()=> infoWindow.open(map,marker));
+      marker.addListener('click', () => infoWindow.open(map, marker));
       shelterMarkersRef.current.push(marker);
     });
   }, [map, shelters, showShelters]);
 
-  // Hydrants
+  // Hydrants => Markers
   useEffect(() => {
     if (!map || !window.google || !hydrants.length) return;
-    hydrantMarkersRef.current.forEach((m)=> m.setMap(null));
-    hydrantMarkersRef.current=[];
+    hydrantMarkersRef.current.forEach((m) => m.setMap(null));
+    hydrantMarkersRef.current = [];
 
-    hydrants.forEach((hyd)=> {
-      const latNum= parseFloat(hyd.latitude), lngNum= parseFloat(hyd.longitude);
-      if(isNaN(latNum)||isNaN(lngNum)) return;
+    hydrants.forEach((hyd) => {
+      const latNum = parseFloat(hyd.latitude), lngNum = parseFloat(hyd.longitude);
+      if (isNaN(latNum) || isNaN(lngNum)) return;
 
-      const marker= new window.google.maps.Marker({
-        position:{ lat:latNum, lng:lngNum},
-        icon:{
+      const marker = new window.google.maps.Marker({
+        position: { lat: latNum, lng: lngNum },
+        icon: {
           url: hydrantpng,
-          scaledSize:new window.google.maps.Size(8,10),
+          scaledSize: new window.google.maps.Size(8, 10),
         },
-        title: hyd.sizeCode||'Hydrant',
+        title: hyd.sizeCode || 'Hydrant',
       });
       if (showHydrants) marker.setMap(map);
 
-      const infoHtml=`
-      <div>
-        <h4>Hydrant #${hyd.objectId||''}</h4>
-        <p>Size Code: ${hyd.sizeCode||''}</p>
-        <p>Make: ${hyd.makeDesc||''}</p>
-        <p>Main Size: ${hyd.mainSize||''}</p>
-        <p>${hyd.tooltip||''}</p>
-        <a href="${hyd.url||'#'}" target="_blank">Details</a>
-      </div>
-      `;
-      const infoWindow= new window.google.maps.InfoWindow({ content:infoHtml});
-      marker.addListener('click',()=> infoWindow.open(map,marker));
       hydrantMarkersRef.current.push(marker);
     });
   }, [map, hydrants, showHydrants]);
 
-  // NASA FIRMS => Heatmap
+  // NASA => Heatmap
   useEffect(() => {
-    if(!map||!window.google||!fireLocations.length) return;
-    if(heatmapRef.current){
+    if (!map || !window.google || !fireLocations.length) return;
+    if (heatmapRef.current) {
       heatmapRef.current.setMap(null);
     }
-    const data= fireLocations.map((f)=>{
-      if(isNaN(f.latitude)||isNaN(f.longitude)) return null;
-      return {
-        location: new window.google.maps.LatLng(f.latitude,f.longitude),
-        weight: f.bright_ti4||1
-      };
-    }).filter(Boolean);
+    const points = fireLocations
+      .map((f) => {
+        if (isNaN(f.latitude) || isNaN(f.longitude)) return null;
+        return {
+          location: new window.google.maps.LatLng(f.latitude, f.longitude),
+          weight: f.bright_ti4 || 1,
+        };
+      })
+      .filter(Boolean);
 
-    heatmapRef.current= new window.google.maps.visualization.HeatmapLayer({
-      data,
+    heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
+      data: points,
       map,
-      radius:30,
-      gradient:[
-        'rgba(0,255,255,0)',
-        'rgba(0,255,255,1)',
-        'rgba(0,191,255,1)',
-        'rgba(0,127,255,1)',
-        'rgba(0,63,255,1)',
-        'rgba(0,0,255,1)',
-        'rgba(63,0,255,1)',
-        'rgba(127,0,255,1)',
-        'rgba(191,0,255,1)',
-        'rgba(255,0,255,1)',
-        'rgba(255,0,191,1)',
-        'rgba(255,0,127,1)',
-        'rgba(255,0,63,1)',
-        'rgba(255,0,0,1)',
-      ],
+      radius: 30,
     });
   }, [map, fireLocations]);
 
   // Fire Extinguish
   const removeFire = (fire) => {
-    setFireLocations((old)=> old.filter((f)=> f!==fire));
-    setExtinguishedCount((old)=> old+1);
+    setFireLocations((old) =>
+      old.filter((f) => f.latitude !== fire.latitude || f.longitude !== fire.longitude)
+    );
+    setExtinguishedCount((old) => old + 1);
   };
   const handleFireExtinguish = (fire) => {
-    let val= fire.bright_ti4||0;
-    if(val>330) val-=200;
-    else if(val>300) val-=150;
-    else val-=100;
-    if(val<0) val=0;
-    fire.bright_ti4=val;
-    if(val<50){
+    let val = fire.bright_ti4 || 0;
+    if (val > 330) val -= 200;
+    else if (val > 300) val -= 150;
+    else val -= 100;
+    if (val < 0) val = 0;
+    fire.bright_ti4 = val;
+
+    if (val < 50) {
       removeFire(fire);
-    }else{
-      setFireLocations((old)=> [...old]);
+    } else {
+      // force re-render => update heatmap
+      setFireLocations((old) => [...old]);
     }
   };
 
-  // Animate Truck
+  // Animate truck marker along coords
   const animateTruckSprite = (pathCoords, fire) => {
-    if(!map||!window.google||!pathCoords.length) return;
-    const marker= new window.google.maps.Marker({
+    if (!map || !window.google || !pathCoords.length) return;
+
+    const marker = new window.google.maps.Marker({
       position: pathCoords[0],
       map,
-      icon:{
+      icon: {
         url: firetruckPng,
-        scaledSize:new window.google.maps.Size(35,35),
+        scaledSize: new window.google.maps.Size(35, 35),
       },
-      // If truck is also .gif => optimized: false
     });
     truckMarkersRef.current.push(marker);
-    let idx=0;
-    const interval= setInterval(()=>{
+
+    let idx = 0;
+    const interval = setInterval(() => {
       idx++;
-      if(idx>=pathCoords.length){
+      if (idx >= pathCoords.length) {
         clearInterval(interval);
+        // Extinguish the fire
         handleFireExtinguish(fire);
+        // Remove the truck
         marker.setMap(null);
-      }else{
+      } else {
         marker.setPosition(pathCoords[idx]);
       }
-    },100);
+    }, 100);
   };
 
-  // Graphhopper
-  const createAvoidPolygonWKT = (fire, radiusKm=10) => {
-    const degRadius= radiusKm/111;
-    const lat= fire.latitude, lng= fire.longitude;
-    const points=[];
-    for(let i=0; i<8; i++){
-      const angle= (Math.PI*2*i)/8;
-      const dx= degRadius*Math.cos(angle);
-      const dy= degRadius*Math.sin(angle);
-      points.push(`${lng+dx} ${lat+dy}`);
-    }
-    points.push(points[0]);
-    return `polygon((${points.join(', ')}))`;
-  };
-
-  const fetchRouteAvoidingFires = async (origin, dest) => {
-    // Avoid polygons for *ALL* fires
-    const polygons = fireLocations.map((f)=> createAvoidPolygonWKT(f,10));
-    const baseUrl= 'https://graphhopper.com/api/1/route';
-    const params= new URLSearchParams();
-    params.append('key', GRAPH_HOPPER_API_KEY);
-    params.append('point', `${origin.lat},${origin.lng}`);
-    params.append('point', `${dest.lat},${dest.lng}`);
-    params.append('vehicle','car');
-    params.append('points_encoded','false');
-    params.append('type','json');
-    polygons.forEach((p)=>{
-      params.append('avoid_polygons',p);
+  // Our server proxy => calls /api/graphhopper-route
+  const postRouteToServer = async (bodyData) => {
+    const url = 'http://localhost:5000/api/graphhopper-route';
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyData),
     });
-
-    const resp= await fetch(`${baseUrl}?${params.toString()}`);
-    if(!resp.ok) throw new Error(`GraphHopper error: ${resp.statusText}`);
+    if (!resp.ok) {
+      throw new Error(`GraphHopper proxy error: ${resp.status} - ${resp.statusText}`);
+    }
     return resp.json();
   };
 
+  /**
+   * Instead of building polygons for *all* fires,
+   * let's only build polygons for the top 50 brightest fires
+   * to avoid 413 Payload Too Large.
+   */
+  const fetchRouteAvoidingFires = async (origin, dest) => {
+    if (!fireLocations || !fireLocations.length) {
+      console.warn('No fires => no avoids. Returning direct route...');
+      return postRouteToServer({
+        points: [
+          [origin.lng, origin.lat],
+          [dest.lng, dest.lat],
+        ],
+        vehicle: 'car',
+        points_encoded: false,
+      });
+    }
+    // 1) Sort fires by brightness
+    const sorted = [...fireLocations].sort((a, b) => (b.bright_ti4 || 0) - (a.bright_ti4 || 0));
+    // 2) Take top 50
+    const topFires = sorted.slice(0, 50);
+    // 3) Build circle polygons
+    const circles = topFires.map((f) =>
+      createCirclePolygonGeoJson(f.latitude, f.longitude, 10, 36)
+    );
+    const multiPolygon = {
+      type: 'MultiPolygon',
+      coordinates: circles.map((c) => [c]),
+    };
+
+    const bodyData = {
+      points: [
+        [origin.lng, origin.lat],
+        [dest.lng, dest.lat],
+      ],
+      vehicle: 'car',
+      points_encoded: false,
+      avoid_polygons: multiPolygon,
+    };
+    return postRouteToServer(bodyData);
+  };
+
+  // Simple route
   const fetchRouteSimple = async (origin, dest) => {
-    const baseUrl= 'https://graphhopper.com/api/1/route';
-    const params= new URLSearchParams();
-    params.append('key', GRAPH_HOPPER_API_KEY);
-    params.append('point', `${origin.lat},${origin.lng}`);
-    params.append('point', `${dest.lat},${dest.lng}`);
-    params.append('vehicle','car');
-    params.append('points_encoded','false');
-    params.append('type','json');
-
-    const resp= await fetch(`${baseUrl}?${params.toString()}`);
-    if(!resp.ok) throw new Error(`GraphHopper error: ${resp.statusText}`);
-    return resp.json();
+    const bodyData = {
+      points: [
+        [origin.lng, origin.lat],
+        [dest.lng, dest.lat],
+      ],
+      vehicle: 'car',
+      points_encoded: false,
+    };
+    return postRouteToServer(bodyData);
   };
 
-  // 1) Find Nearest Shelter => Avoid ALL fires
+  // 1) Find Nearest Shelter => Avoid top 50 fires
   const handleSearch = async () => {
-    if(!geocoderRef.current) return;
+    if (!geocoderRef.current) return;
     setDistanceTraveled(null);
 
-    const addrEl= document.getElementById('address-input');
-    if(!addrEl) return;
-    const address= addrEl.value.trim();
-    if(!address) {
-      alert("Please enter an address.");
+    const addrEl = document.getElementById('address-input');
+    if (!addrEl) return;
+    const address = addrEl.value.trim();
+    if (!address) {
+      alert('Please enter an address.');
       return;
     }
 
     geocoderRef.current.geocode({ address }, async (results, status) => {
-      if(status==='OK' && results[0]){
-        const loc= results[0].geometry.location;
-        const userLat= loc.lat(), userLng= loc.lng();
+      if (status === 'OK' && results[0]) {
+        const loc = results[0].geometry.location;
+        const userLat = loc.lat();
+        const userLng = loc.lng();
 
         // find nearest shelter
-        let nearest= null, minDist= Infinity;
-        shelters.forEach((sh)=>{
-          const lat= parseFloat(sh.latitude), lng= parseFloat(sh.longitude);
-          const dist= Math.sqrt((userLat-lat)**2 + (userLng-lng)**2);
-          if(dist<minDist){
-            minDist= dist; nearest= { lat, lng };
+        let nearest = null;
+        let minDist = Infinity;
+        for (let s of shelters) {
+          const lat = parseFloat(s.latitude), lng = parseFloat(s.longitude);
+          if (isNaN(lat) || isNaN(lng)) continue;
+          const dist = Math.sqrt((userLat - lat) ** 2 + (userLng - lng) ** 2);
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = { lat, lng };
           }
-        });
-        if(!nearest){
-          alert("No shelter found");
+        }
+        if (!nearest) {
+          alert('No shelter found.');
           return;
         }
 
-        try{
-          const routeData= await fetchRouteAvoidingFires({ lat:userLat, lng:userLng }, nearest);
-          if(routeData.paths && routeData.paths.length>0){
-            const pathObj= routeData.paths[0];
-            const coords= pathObj.points.coordinates.map(([ln,la])=>({ lat:la, lng:ln }));
-            if(pathPolyline) pathPolyline.setMap(null);
-            const newPolyline= new window.google.maps.Polyline({
+        try {
+          const routeData = await fetchRouteAvoidingFires({ lat: userLat, lng: userLng }, nearest);
+          if (routeData.paths && routeData.paths.length > 0) {
+            const pathObj = routeData.paths[0];
+            const coords = pathObj.points.coordinates.map(([ln, la]) => ({
+              lat: la,
+              lng: ln,
+            }));
+            if (pathPolyline) pathPolyline.setMap(null);
+
+            const newPolyline = new window.google.maps.Polyline({
               path: coords,
               geodesic: true,
-              strokeColor:'#00BFFF',
-              strokeOpacity:0.8,
-              strokeWeight:5,
+              strokeColor: '#00BFFF',
+              strokeOpacity: 0.8,
+              strokeWeight: 5,
               map,
             });
             setPathPolyline(newPolyline);
 
-            if(pathObj.distance) setDistanceTraveled(pathObj.distance);
+            if (pathObj.distance) setDistanceTraveled(pathObj.distance);
             map.setCenter(coords[0]);
             map.setZoom(10);
-          }else{
-            alert("No route found. Try a different address or check data.");
+          } else {
+            alert('No route found. Possibly due to limited avoid polygons.');
           }
-        }catch(err){
-          console.error("Error fetching route:", err);
-          alert("Error fetching route. See console.");
+        } catch (err) {
+          console.error('Error fetching route:', err);
+          alert(`Error fetching route: ${err.message}`);
         }
-      }else{
-        alert("Geocode was not successful: "+ status);
+      } else {
+        alert('Geocode was not successful: ' + status);
       }
     });
   };
 
-  // 2) Deploy Trucks => from each fire station => best fire
+  // 2) Deploy Trucks => from each station => best fire
   const simulateTruckDeployment = async () => {
-    if(!map|| !window.google) return;
+    if (!map || !window.google) return;
 
     // Clear old trucks
-    truckMarkersRef.current.forEach((mk)=> mk.setMap(null));
-    truckMarkersRef.current=[];
+    truckMarkersRef.current.forEach((mk) => mk.setMap(null));
+    truckMarkersRef.current = [];
 
     // Sort fires by brightness
-    const sorted= [...fireLocations].sort((a,b)=> b.bright_ti4 - a.bright_ti4);
+    const sorted = [...fireLocations].sort((a, b) => (b.bright_ti4 || 0) - (a.bright_ti4 || 0));
 
     // 1 truck per station
-    for(let station of fireStations){
-      const { the_geom }= station;
-      if(!the_geom|| !the_geom.coordinates) continue;
-      const [lng, lat]= the_geom.coordinates;
-      const stLat= parseFloat(lat), stLng= parseFloat(lng);
-      if(isNaN(stLat)|| isNaN(stLng)) continue;
+    for (let station of fireStations) {
+      const { the_geom } = station;
+      if (!the_geom || !the_geom.coordinates) continue;
+      const [lng, lat] = the_geom.coordinates;
+      const stLat = parseFloat(lat), stLng = parseFloat(lng);
+      if (isNaN(stLat) || isNaN(stLng)) continue;
 
-      let bestFire=null, bestScore=-Infinity;
-      for(let fire of sorted){
-        if(fire.assigned) continue;
-        const dist= Math.sqrt((stLat- fire.latitude)**2 + (stLng-fire.longitude)**2);
-        const brightness= fire.bright_ti4 ||1;
-        const score= brightness/(dist+0.01);
-        if(score> bestScore){
-          bestScore= score; bestFire= fire;
+      let bestFire = null, bestScore = -Infinity;
+      for (let fire of sorted) {
+        if (fire.assigned) continue;
+        const dist = Math.sqrt((stLat - fire.latitude) ** 2 + (stLng - fire.longitude) ** 2);
+        const brightness = fire.bright_ti4 || 1;
+        const score = brightness / (dist + 0.01);
+        if (score > bestScore) {
+          bestScore = score;
+          bestFire = fire;
         }
       }
-      if(bestFire){
-        bestFire.assigned= true;
-        const origin= { lat: stLat, lng: stLng };
-        const destination= { lat: bestFire.latitude, lng: bestFire.longitude};
-        try{
-          const routeData= await fetchRouteSimple(origin,destination);
-          if(routeData.paths && routeData.paths.length>0){
-            const coords= routeData.paths[0].points.coordinates.map(([ln,la])=>({ lat:la, lng:ln }));
+      if (bestFire) {
+        bestFire.assigned = true;
+        const origin = { lat: stLat, lng: stLng };
+        const destination = { lat: bestFire.latitude, lng: bestFire.longitude };
+
+        try {
+          const routeData = await fetchRouteSimple(origin, destination);
+          if (routeData.paths && routeData.paths.length > 0) {
+            const coords = routeData.paths[0].points.coordinates.map(([ln, la]) => ({
+              lat: la,
+              lng: ln,
+            }));
+            // Draw a red polyline
             new window.google.maps.Polyline({
               path: coords,
-              geodesic:true,
-              strokeColor:'#FF0000',
-              strokeOpacity:0.8,
-              strokeWeight:4,
+              geodesic: true,
+              strokeColor: '#FF0000',
+              strokeOpacity: 0.8,
+              strokeWeight: 4,
               map,
             });
-            // Animate truck
-            animateTruckSprite(coords,bestFire);
+            // Animate the truck => extinguish the fire
+            animateTruckSprite(coords, bestFire);
           }
-        }catch(err){
-          console.error("Error route for truck:",err);
+        } catch (err) {
+          console.error('Error route for truck:', err);
         }
       }
     }
@@ -890,15 +898,13 @@ const FireStationsMap = () => {
         <div className="text-gray-800 font-bold space-y-1">
           <div>
             Distance Traveled:
-            {distanceTraveled==null
-              ? " N/A"
-              : (distanceTraveled<1000 
-                ? ` ${distanceTraveled.toFixed(1)} m`
-                : ` ${(distanceTraveled/1000).toFixed(2)} km`
-              )
-            }
+            {distanceTraveled == null
+              ? ' N/A'
+              : distanceTraveled < 1000
+              ? ` ${distanceTraveled.toFixed(1)} m`
+              : ` ${(distanceTraveled / 1000).toFixed(2)} km`}
           </div>
-          <div>Active Fires: {fireLocations.length}</div>
+          <div>Active Fires: {activeFires}</div>
           <div>Extinguished Fires: {extinguishedCount}</div>
         </div>
 
@@ -908,7 +914,7 @@ const FireStationsMap = () => {
             <input
               type="checkbox"
               checked={showFireStations}
-              onChange={(e)=> setShowFireStations(e.target.checked)}
+              onChange={(e) => setShowFireStations(e.target.checked)}
             />
             <span>Show Fire Stations</span>
           </label>
@@ -916,7 +922,7 @@ const FireStationsMap = () => {
             <input
               type="checkbox"
               checked={showShelters}
-              onChange={(e)=> setShowShelters(e.target.checked)}
+              onChange={(e) => setShowShelters(e.target.checked)}
             />
             <span>Show Shelters</span>
           </label>
@@ -924,7 +930,7 @@ const FireStationsMap = () => {
             <input
               type="checkbox"
               checked={showHydrants}
-              onChange={(e)=> setShowHydrants(e.target.checked)}
+              onChange={(e) => setShowHydrants(e.target.checked)}
             />
             <span>Show Hydrants</span>
           </label>
@@ -934,7 +940,7 @@ const FireStationsMap = () => {
       {/* The Map */}
       <div id="map" className="w-full h-full" />
 
-      {/* Quirky Chatbot with Nebius AI */}
+      {/* Quirky Chatbot */}
       <QuirkyInsuranceChatbot />
     </div>
   );
