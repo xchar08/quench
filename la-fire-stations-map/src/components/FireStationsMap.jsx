@@ -2,7 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
-// Removed the faulty import for AdvancedMarkerElement
+import Papa from 'papaparse';
+
+
 
 const FireStationsMap = () => {
   const [fireStations, setFireStations] = useState([]);
@@ -12,6 +14,8 @@ const FireStationsMap = () => {
   const mapInstanceRef = useRef(null); // Reference to the map instance
   const fireMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
+  const fireLocMarkersRef = useRef([]);
+  const [fireLocations, setFireLocations] = useState([]);
 
   // Retrieve API key and Map ID from environment variables
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -44,6 +48,44 @@ const FireStationsMap = () => {
     };
 
     fetchShelters();
+  }, []);
+// get fire location data from nasa firms
+const csvToJson = (csv) => {
+  return Papa.parse(csv, {
+    header: true, // First row is treated as the header
+    skipEmptyLines: true, // Skip empty rows
+    dynamicTyping: true, // Convert numbers to proper numeric types
+    complete: (results) => {
+      // Convert parsed data to the required format
+
+      const locations = results.data.map((fire) => ({
+        lat: fire.latitude,
+        lng: fire.longitude,
+        brightness: fire.bright_ti4,
+      }));
+      console.log("done", locations)
+
+    },
+  })
+};
+  // fetch fire locations
+  useEffect(() => {
+    const fetchFireData = async () => {
+      try {
+        const response = await fetch(
+          'https://firms.modaps.eosdis.nasa.gov/api/area/csv/d3ff7053e821cf760bf415e628a9dce7/VIIRS_SNPP_NRT/-124,32,-113,42/1/2025-01-14'
+        );
+        const data = await response.text();
+        const jsonData = csvToJson(data);
+        console.log('Fetched fires data:', jsonData); // Debugging log
+        setFireLocations(jsonData.data);
+        
+      } catch (error) {
+        console.error('Error fetching fire data:', error);
+      }
+    };
+  
+    fetchFireData();
   }, []);
 
   // Initialize Google Maps
@@ -198,6 +240,61 @@ const FireStationsMap = () => {
       });
     }
   }, [mapInstanceRef.current, shelters]);
+
+// display fires
+  useEffect(() => {
+    if (mapInstanceRef.current && fireLocations.length > 0) {
+      // Clear existing fire markers
+      fireLocMarkersRef.current.forEach((marker) => marker.setMap(null));
+      fireLocMarkersRef.current = [];
+
+      fireLocations.forEach((fire) => {
+        const { latitude, longitude, brightness } = fire;
+        if (!latitude || !longitude) {
+          console.warn('fire missing coordinates:', fire);
+          return;
+        }
+
+        const latNum = parseFloat(latitude);
+        const lngNum = parseFloat(longitude);
+
+        if (isNaN(latNum) || isNaN(lngNum)) {
+          console.warn('Invalid coordinates for fire:', fire);
+          return;
+        }
+
+        // Create custom marker content
+        const markerElement = createMarkerContent('green');
+
+        // Instantiate AdvancedMarkerElement
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+          map: mapInstanceRef.current,
+          position: { lat: latNum, lng: lngNum },
+          title: name,
+          content: markerElement,
+        });
+
+        // Create an InfoWindow for Shelter
+        // const infoWindow = new google.maps.InfoWindow({
+        //   content: `
+        //     <div style="padding: 10px; font-family: Arial, sans-serif;">
+        //       <h2 style="font-size: 16px; font-weight: bold;">${name}</h2>
+        //       <p>${streetAddress}, ${city}, ${state} ${zip}</p>
+        //     </div>
+        //   `,
+        // });
+
+        // Add click listener using google.maps.event.addListener
+        google.maps.event.addListener(marker, 'click', () => {
+          infoWindow.open(mapInstanceRef.current, marker);
+        });
+
+        // Store marker reference
+        fireLocMarkersRef.current.push(marker);
+      });
+    }
+  }, [mapInstanceRef.current, fireLocations]);
+
 
   return (
     <div className="relative">
