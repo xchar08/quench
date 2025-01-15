@@ -351,73 +351,77 @@ const FireStationsMap = () => {
 
   // Draw NOAA polygons + cat markers
   useEffect(() => {
-    if (!map || !window.google || alertsLoading || !alerts.length) return;
+    const drawNOAAAlerts = async () => {
+      if (!map || !window.google || alertsLoading || !alerts.length) return;
 
-    // Clear old polygons/markers
-    alertsRef.current.forEach((p) => p.setMap(null));
-    dangerMarkersRef.current.forEach((m) => m.setMap(null));
-    alertsRef.current = [];
-    dangerMarkersRef.current = [];
+      // Clear old polygons/markers
+      alertsRef.current.forEach((p) => p.setMap(null));
+      dangerMarkersRef.current.forEach((m) => m.setMap(null));
+      alertsRef.current = [];
+      dangerMarkersRef.current = [];
 
-    alerts.forEach((alert) => {
-      const sev = alert.properties.severity || 'Unknown';
-      const color = getAlertColor(sev);
-      const zones = alert.properties.affectedZones;
-      if (zones && zones.length > 0) {
-        zones.forEach(async (zoneUrl) => {
-          try {
-            const resp = await axios.get(zoneUrl);
-            const zoneData = resp.data;
-            if (
-              zoneData.geometry &&
-              zoneData.geometry.type === 'Polygon' &&
-              zoneData.geometry.coordinates
-            ) {
-              const coords = zoneData.geometry.coordinates[0];
-              const polygonPath = coords.map(([ln, la]) => ({ lat: la, lng: ln }));
+      alerts.forEach((alert) => {
+        const sev = alert.properties.severity || 'Unknown';
+        const color = getAlertColor(sev);
+        const zones = alert.properties.affectedZones;
+        if (zones && zones.length > 0) {
+          zones.forEach(async (zoneUrl) => {
+            try {
+              const resp = await axios.get(zoneUrl);
+              const zoneData = resp.data;
+              if (
+                zoneData.geometry &&
+                zoneData.geometry.type === 'Polygon' &&
+                zoneData.geometry.coordinates
+              ) {
+                const coords = zoneData.geometry.coordinates[0];
+                const polygonPath = coords.map(([ln, la]) => ({ lat: la, lng: ln }));
 
-              const polygon = new window.google.maps.Polygon({
-                paths: polygonPath,
-                strokeColor: color,
-                strokeOpacity: 0.3,
-                strokeWeight: 2,
-                fillColor: color,
-                fillOpacity: 0.1,
-                // setMap => we toggle below
-              });
+                const polygon = new window.google.maps.Polygon({
+                  paths: polygonPath,
+                  strokeColor: color,
+                  strokeOpacity: 0.3,
+                  strokeWeight: 2,
+                  fillColor: color,
+                  fillOpacity: 0.1,
+                  map: showAlerts ? map : null, // Set map based on showAlerts
+                });
 
-              const infoText = alert.properties.summary || alert.properties.description || '';
-              const infoWindow = new window.google.maps.InfoWindow({
-                content: `<div><p style="color:${color}">${alert.properties.headline || 'Hazard Alert'}</p><p>${infoText}</p></div>`,
-              });
-              polygon.addListener('click', (e) => {
-                infoWindow.setPosition(e.latLng);
-                infoWindow.open(map);
-              });
-              alertsRef.current.push(polygon);
+                const infoText = alert.properties.summary || alert.properties.description || '';
+                const infoWindow = new window.google.maps.InfoWindow({
+                  content: `<div><p style="color:${color}">${alert.properties.headline || 'Hazard Alert'}</p><p>${infoText}</p></div>`,
+                });
+                polygon.addListener('click', (e) => {
+                  infoWindow.setPosition(e.latLng);
+                  infoWindow.open(map);
+                });
+                alertsRef.current.push(polygon);
 
-              // spinning cat
-              const centroid = getPolygonCentroid(coords);
-              const catMarker = new window.google.maps.Marker({
-                position: centroid,
-                icon: {
-                  url: spinningCatGif,
-                  scaledSize: new window.google.maps.Size(35, 35),
-                },
-                // setMap => toggled below
-                optimized: false,
-                title: `Alert: ${sev}`,
-              });
-              catMarker.addListener('click', () => infoWindow.open(map, catMarker));
-              dangerMarkersRef.current.push(catMarker);
+                // spinning cat
+                const centroid = getPolygonCentroid(coords);
+                const catMarker = new window.google.maps.Marker({
+                  position: centroid,
+                  icon: {
+                    url: spinningCatGif,
+                    scaledSize: new window.google.maps.Size(35, 35),
+                  },
+                  map: showAlerts ? map : null, // Set map based on showAlerts
+                  optimized: false,
+                  title: `Alert: ${sev}`,
+                });
+                catMarker.addListener('click', () => infoWindow.open(map, catMarker));
+                dangerMarkersRef.current.push(catMarker);
+              }
+            } catch (er) {
+              console.error('Error fetching NOAA zone data:', er);
             }
-          } catch (er) {
-            console.error('Error fetching NOAA zone data:', er);
-          }
-        });
-      }
-    });
-  }, [map, alerts, alertsLoading]);
+          });
+        }
+      });
+    };
+
+    drawNOAAAlerts();
+  }, [map, alerts, alertsLoading, showAlerts]); // Added showAlerts as a dependency
 
   // NASA FIRMS => fetch fires
   const csvToJson = (csv) => {
@@ -522,6 +526,7 @@ const FireStationsMap = () => {
           scaledSize: new window.google.maps.Size(30, 30),
         },
         title: shp_addr || 'Fire Station',
+        map: showFireStations ? map : null, // Set map based on showFireStations
       });
       if (showFireStations) marker.setMap(map);
 
@@ -552,6 +557,7 @@ const FireStationsMap = () => {
           scaledSize: new window.google.maps.Size(28, 28),
         },
         title: name || 'Shelter',
+        map: showShelters ? map : null, // Set map based on showShelters
       });
       if (showShelters) marker.setMap(map);
 
@@ -583,6 +589,7 @@ const FireStationsMap = () => {
           scaledSize: new window.google.maps.Size(8, 10),
         },
         title: hyd.sizeCode || 'Hydrant',
+        map: showHydrants ? map : null, // Set map based on showHydrants
       });
       if (showHydrants) marker.setMap(map);
 
@@ -615,7 +622,7 @@ const FireStationsMap = () => {
 
     heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
       data: points,
-      map,
+      map: showFires ? map : null, // Set map based on showFires
       radius: 30,
     });
   }, [map, fireLocations, showFires]);
