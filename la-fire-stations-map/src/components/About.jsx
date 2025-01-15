@@ -1,5 +1,5 @@
 import React from 'react';
-import BackgroundParticles from './components/BackgroundParticles';
+import BackgroundParticles from './BackgroundParticles';
 
 function About() {
   return (
