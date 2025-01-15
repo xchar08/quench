@@ -136,8 +136,7 @@ app.get('/api/shelters', async (req, res) => {
  * ---------------
  * GRAPHHOPPER PROXY
  * ---------------
- * Your React code calls POST /api/graphhopper-route with a JSON body.
- * We forward that to GraphHopper server-side, bypassing CORS.
+ * Forwards POST requests from React to GraphHopper, bypassing CORS.
  */
 app.post('/api/graphhopper-route', async (req, res) => {
   try {
@@ -158,6 +157,36 @@ app.post('/api/graphhopper-route', async (req, res) => {
     res.json(ghResp.data);
   } catch (error) {
     console.error('GraphHopper Proxy Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * ---------------
+ * NEBIUS PROXY
+ * ---------------
+ * Forwards POST requests to Nebius API, bypassing CORS restrictions.
+ */
+app.post('/api/nebius-proxy', async (req, res) => {
+  try {
+    const NEBIUS_API_KEY = process.env.NEBIUS_API_KEY;
+    if (!NEBIUS_API_KEY) {
+      return res.status(500).json({ error: 'Missing Nebius API key in .env.' });
+    }
+
+    const nebiusUrl = 'https://api.studio.nebius.ai/v1/chat/completions';
+
+    const nebiusResp = await axios.post(nebiusUrl, req.body, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${NEBIUS_API_KEY}`,
+      },
+    });
+
+    res.set('Access-Control-Allow-Origin', '*');
+    res.json(nebiusResp.data);
+  } catch (error) {
+    console.error('Nebius Proxy Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

@@ -4,7 +4,6 @@ import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
 import Papa from 'papaparse';
 import * as tf from '@tensorflow/tfjs';
-import OpenAI from 'openai';
 
 // IMAGE IMPORTS (adjust paths for your setup)
 import hydrantpng from '../assets/firehydrant.png';
@@ -20,7 +19,6 @@ import chatbotImg2 from '../assets/chatbot/bot2.png';
 // ENV (from your .env)
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const mapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
-const NEBIUS_API_KEY = import.meta.env.VITE_NEBIUS_API_KEY;
 
 /**
  * createCirclePolygonGeoJson:
@@ -41,27 +39,21 @@ function createCirclePolygonGeoJson(lat, lng, radiusKm = 10, sides = 36) {
 }
 
 /** 
- * QUIRKY INSURANCE CHATBOT (Burnie) with Nebius AI
+ * QUIRKY INSURANCE CHATBOT (Burnie) using server-side proxy for Nebius AI
  */
 function QuirkyInsuranceChatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: "Hello! I'm Burnie, your 2025 CA wildfire insurance & safety chatbot! Ask me about: \n- How to pack a go-bag \n- How to file insurance claims for lost property"
-    }
+      content:
+        "Hello! I'm Burnie, your 2025 CA wildfire insurance & safety chatbot! Ask me about: \n- How to pack a go-bag \n- How to file insurance claims for lost property",
+    },
   ]);
   const [userInput, setUserInput] = useState('');
   const [botImageIndex, setBotImageIndex] = useState(0);
 
   const chatbotImages = [chatbotImg1, chatbotImg2];
-
-  // Nebius AI client
-  const nebiusClient = new OpenAI({
-    baseURL: 'https://api.studio.nebius.ai/v1/',
-    apiKey: NEBIUS_API_KEY,
-    dangerouslyAllowBrowser: true,
-  });
 
   const handleSend = async () => {
     if (!userInput.trim()) return;
@@ -72,29 +64,37 @@ function QuirkyInsuranceChatbot() {
     setBotImageIndex((prev) => (prev + 1) % 2);
 
     try {
-      const response = await nebiusClient.chat.completions.create({
-        max_tokens: 150,
-        temperature: 0.7,
-        model: 'meta-llama/Meta-Llama-3.1-70B-Instruct',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are Burnie, a quirky 2025 CA wildfire insurance & safety chatbot with puns & disclaimers.'
-          },
-          {
-            role: 'user',
-            content: userMsg
-          }
-        ]
+      const response = await fetch('/api/nebius-proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          max_tokens: 150,
+          temperature: 0.7,
+          model: 'meta-llama/Meta-Llama-3.1-70B-Instruct',
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are Burnie, a quirky 2025 CA wildfire insurance & safety chatbot with puns & disclaimers.',
+            },
+            {
+              role: 'user',
+              content: userMsg,
+            },
+          ],
+        }),
       });
-      const aiContent = response.choices[0].message.content;
+
+      const aiResult = await response.json();
+      const aiContent = aiResult.choices[0].message.content;
       setMessages((prev) => [...prev, { role: 'assistant', content: aiContent }]);
     } catch (err) {
       console.error('Nebius AI error:', err);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: 'Burnie had trouble connecting to Nebius. Sorry!' }
+        { role: 'assistant', content: 'Burnie had trouble connecting to Nebius. Sorry!' },
       ]);
     }
   };
@@ -135,18 +135,14 @@ function QuirkyInsuranceChatbot() {
               return (
                 <div
                   key={i}
-                  className={`my-2 flex flex-col ${
-                    isBurnie ? 'items-start' : 'items-end'
-                  }`}
+                  className={`my-2 flex flex-col ${isBurnie ? 'items-start' : 'items-end'}`}
                 >
                   <div
                     className={`max-w-[70%] px-3 py-2 rounded-lg shadow text-sm ${
                       isBurnie ? 'bg-orange-100 text-orange-900' : 'bg-gray-200 text-gray-800'
                     }`}
                   >
-                    <span className="font-semibold block mb-1">
-                      {isBurnie ? 'Burnie' : 'You'}
-                    </span>
+                    <span className="font-semibold block mb-1">{isBurnie ? 'Burnie' : 'You'}</span>
                     <span className="whitespace-pre-line break-words">{msg.content}</span>
                   </div>
                 </div>
@@ -210,8 +206,8 @@ const FireStationsMap = () => {
   const [showFireStations, setShowFireStations] = useState(true);
   const [showShelters, setShowShelters] = useState(true);
   const [showHydrants, setShowHydrants] = useState(true);
-  const [showFires, setShowFires] = useState(true);      // NEW: toggle NASA FIRMS
-  const [showAlerts, setShowAlerts] = useState(true);    // NEW: toggle NOAA Alerts
+  const [showFires, setShowFires] = useState(true);      // toggle NASA FIRMS heatmap
+  const [showAlerts, setShowAlerts] = useState(true);    // toggle NOAA Alerts
 
   // TF model
   const [model, setModel] = useState(null);
@@ -384,7 +380,7 @@ const FireStationsMap = () => {
                   strokeWeight: 2,
                   fillColor: color,
                   fillOpacity: 0.1,
-                  map: showAlerts ? map : null, // Set map based on showAlerts
+                  map: showAlerts ? map : null,
                 });
 
                 const infoText = alert.properties.summary || alert.properties.description || '';
@@ -413,14 +409,14 @@ const FireStationsMap = () => {
                     // Create SVG for clipping
                     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                     svg.setAttribute('style', 'position: absolute; width: 100%; height: 100%;');
-                    
+
                     // Create clipPath
                     const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
                     clipPath.setAttribute('id', `clip-${Math.random().toString(36).substr(2, 9)}`);
-                    
+
                     // Create polygon for clipping
                     const clipPolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-                    
+
                     // Create image that fills the div
                     const img = document.createElement('img');
                     img.src = spinningCatGif;
@@ -441,7 +437,7 @@ const FireStationsMap = () => {
 
                   draw() {
                     const overlayProjection = this.getProjection();
-                    
+
                     // Convert bounds to pixel coordinates
                     const sw = overlayProjection.fromLatLngToDivPixel(this.bounds.getSouthWest());
                     const ne = overlayProjection.fromLatLngToDivPixel(this.bounds.getNorthEast());
@@ -479,20 +475,20 @@ const FireStationsMap = () => {
                   // Show info window
                   infoWindow.setPosition(e.latLng);
                   infoWindow.open(map);
-                  
+
                   if (showAlerts) {
                     // Remove any existing overlays
                     dangerMarkersRef.current.forEach(overlay => overlay.setMap(null));
-                    
+
                     // Create and add new overlay
                     const catOverlay = new CatOverlay(bounds, polygonPath);
                     catOverlay.setMap(map);
-                    
+
                     // Store reference to current overlay
                     dangerMarkersRef.current = [catOverlay];
                   }
                 });
-                
+
                 // Add listener to hide overlay when info window closes
                 infoWindow.addListener('closeclick', () => {
                   dangerMarkersRef.current.forEach(overlay => overlay.setMap(null));
@@ -508,7 +504,7 @@ const FireStationsMap = () => {
     };
 
     drawNOAAAlerts();
-  }, [map, alerts, alertsLoading, showAlerts]); // Added showAlerts as a dependency
+  }, [map, alerts, alertsLoading, showAlerts]);
 
   // NASA FIRMS => fetch fires
   const csvToJson = (csv) => {
@@ -614,7 +610,7 @@ const FireStationsMap = () => {
           scaledSize: new window.google.maps.Size(30, 30),
         },
         title: shp_addr || 'Fire Station',
-        map: showFireStations ? map : null, // Set map based on showFireStations
+        map: showFireStations ? map : null,
       });
 
       const infoWindow = new window.google.maps.InfoWindow({
@@ -644,7 +640,7 @@ const FireStationsMap = () => {
           scaledSize: new window.google.maps.Size(28, 28),
         },
         title: name || 'Shelter',
-        map: showShelters ? map : null, // Set map based on showShelters
+        map: showShelters ? map : null,
       });
 
       const infoWindow = new window.google.maps.InfoWindow({
@@ -675,23 +671,21 @@ const FireStationsMap = () => {
           scaledSize: new window.google.maps.Size(8, 10),
         },
         title: hyd.sizeCode || 'Hydrant',
-        map: showHydrants ? map : null, // Set map based on showHydrants
+        map: showHydrants ? map : null,
       });
       hydrantMarkersRef.current.push(marker);
     });
   }, [map, hydrants, showHydrants]);
 
   // NASA => Heatmap
-  // We toggle the heatmap on/off based on showFires
   useEffect(() => {
     if (!map || !window.google) return;
 
-    // If we already have a heatmap, remove it
     if (heatmapRef.current) {
       heatmapRef.current.setMap(null);
     }
     if (!showFires || !fireLocations.length) {
-      return; // don't rebuild the heatmap if toggled off or no fires
+      return;
     }
 
     const points = fireLocations
@@ -706,27 +700,23 @@ const FireStationsMap = () => {
 
     heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
       data: points,
-      map: showFires ? map : null, // Set map based on showFires
+      map: showFires ? map : null,
       radius: 30,
     });
   }, [map, fireLocations, showFires]);
 
   // NOAA => Toggling polygons/cats
-  // We'll do a separate effect that sets each polygon/cat's map to either "map" or null
   useEffect(() => {
     if (!map || !window.google) return;
     if (!alertsRef.current.length && !dangerMarkersRef.current.length) return;
 
-    // toggling showAlerts => setMap(showAlerts ? map : null)
     alertsRef.current.forEach((poly) => poly.setMap(showAlerts ? map : null));
     dangerMarkersRef.current.forEach((cat) => cat.setMap(showAlerts ? map : null));
   }, [map, showAlerts]);
 
   // Fire Extinguish
   const removeFire = (fireId) => {
-    setFireLocations((old) =>
-      old.filter((f) => f.id !== fireId)
-    );
+    setFireLocations((old) => old.filter((f) => f.id !== fireId));
     setExtinguishedCount((prev) => prev + 1);
     setActiveFires((prev) => prev - 1);
   };
@@ -741,7 +731,6 @@ const FireStationsMap = () => {
     if (val < 50) {
       removeFire(fire.id);
     } else {
-      // force re-render => update heatmap
       setFireLocations((old) => [...old]);
     }
   };
@@ -749,7 +738,7 @@ const FireStationsMap = () => {
   // Animate truck marker along coords
   const animateTruckSprite = (pathCoords, fire) => {
     if (!map || !window.google || !pathCoords.length) return;
-  
+
     const marker = new window.google.maps.Marker({
       position: pathCoords[0],
       map,
@@ -759,27 +748,22 @@ const FireStationsMap = () => {
       },
     });
     truckMarkersRef.current.push(marker);
-  
+
     let idx = 0;
     const interval = setInterval(() => {
       idx++;
       if (idx >= pathCoords.length) {
         clearInterval(interval);
-        // Extinguish the fire and update counts
         handleFireExtinguish(fire);
-        // Remove the truck
         marker.setMap(null);
-        // Update the leaderboard
-        setActiveFires(prevActiveFires => prevActiveFires - 1);
-        setExtinguishedCount(prevCount => prevCount + 1);
+        setActiveFires((prev) => prev - 1);
+        setExtinguishedCount((prev) => prev + 1);
       } else {
         marker.setPosition(pathCoords[idx]);
       }
     }, 100);
   };
-  
 
-  // Our server proxy => calls /api/graphhopper-route
   const postRouteToServer = async (bodyData) => {
     const url = 'http://localhost:5000/api/graphhopper-route';
     const resp = await fetch(url, {
@@ -793,7 +777,6 @@ const FireStationsMap = () => {
     return resp.json();
   };
 
-  // fetchRouteAvoidingFires => limit top 50 bright fires => multiPolygon
   const fetchRouteAvoidingFires = async (origin, dest) => {
     if (!fireLocations || !fireLocations.length) {
       console.warn('No fires => no avoids. Returning direct route...');
@@ -806,9 +789,8 @@ const FireStationsMap = () => {
         points_encoded: false,
       });
     }
-    // sort by brightness
     const sorted = [...fireLocations].sort((a, b) => (b.bright_ti4 || 0) - (a.bright_ti4 || 0));
-    const topFires = sorted.slice(0, 50); // limit to top 50
+    const topFires = sorted.slice(0, 50);
     const circles = topFires.map((f) =>
       createCirclePolygonGeoJson(f.latitude, f.longitude, 10, 36)
     );
@@ -829,7 +811,6 @@ const FireStationsMap = () => {
     return postRouteToServer(bodyData);
   };
 
-  // Simple route
   const fetchRouteSimple = async (origin, dest) => {
     const bodyData = {
       points: [
@@ -842,7 +823,6 @@ const FireStationsMap = () => {
     return postRouteToServer(bodyData);
   };
 
-  // 1) Find Nearest Shelter => Avoid top 50 fires
   const handleSearch = async () => {
     if (!geocoderRef.current) return;
     setDistanceTraveled(null);
@@ -854,14 +834,13 @@ const FireStationsMap = () => {
       alert('Please enter an address.');
       return;
     }
-  
+
     geocoderRef.current.geocode({ address }, async (results, status) => {
       if (status === 'OK' && results[0]) {
         const loc = results[0].geometry.location;
         const userLat = loc.lat();
         const userLng = loc.lng();
 
-        // find nearest shelter
         let nearest = null;
         let minDist = Infinity;
         for (let s of shelters) {
@@ -879,7 +858,10 @@ const FireStationsMap = () => {
         }
 
         try {
-          const routeData = await fetchRouteAvoidingFires({ lat: userLat, lng: userLng }, nearest);
+          const routeData = await fetchRouteAvoidingFires(
+            { lat: userLat, lng: userLng },
+            nearest
+          );
           if (routeData.paths && routeData.paths.length > 0) {
             const pathObj = routeData.paths[0];
             const coords = pathObj.points.coordinates.map(([ln, la]) => ({
@@ -914,18 +896,14 @@ const FireStationsMap = () => {
     });
   };
 
-  // 2) Deploy Trucks => from each station => best fire
   const simulateTruckDeployment = async () => {
     if (!map || !window.google) return;
 
-    // Clear old trucks
     truckMarkersRef.current.forEach((mk) => mk.setMap(null));
     truckMarkersRef.current = [];
 
-    // Sort fires by brightness
     const sorted = [...fireLocations].sort((a, b) => (b.bright_ti4 || 0) - (a.bright_ti4 || 0));
 
-    // 1 truck per station
     for (let station of fireStations) {
       const { the_geom } = station;
       if (!the_geom || !the_geom.coordinates) continue;
@@ -956,7 +934,6 @@ const FireStationsMap = () => {
               lat: la,
               lng: ln,
             }));
-            // Draw red polyline
             new window.google.maps.Polyline({
               path: coords,
               geodesic: true,
@@ -965,7 +942,6 @@ const FireStationsMap = () => {
               strokeWeight: 4,
               map,
             });
-            // Animate the truck => extinguish
             animateTruckSprite(coords, bestFire);
           }
         } catch (err) {
@@ -975,9 +951,6 @@ const FireStationsMap = () => {
     }
   };
 
-  // ----------------------------------------------------------------
-  // Render
-  // ----------------------------------------------------------------
   return (
     <div className="relative w-full h-screen font-sans">
       {loading && (
@@ -1051,7 +1024,6 @@ const FireStationsMap = () => {
             <span>Show Hydrants</span>
           </label>
 
-          {/* NEW toggles for NASA + NOAA */}
           <label className="flex items-center space-x-2">
             <input
               type="checkbox"
@@ -1099,5 +1071,3 @@ const FireStationsMap = () => {
 };
 
 export default FireStationsMap;
-
-/*secret*/
