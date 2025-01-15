@@ -1020,7 +1020,7 @@ const FireStationsMap = () => {
               ? ` ${distanceTraveled.toFixed(1)} m`
               : ` ${(distanceTraveled / 1000).toFixed(2)} km`}
           </div>
-          <div>Starting Fires: {activeFires}</div>
+          <div>Starting # of Fires: {activeFires}</div>
           <div>Extinguished Fires: {extinguishedCount}</div>
         </div>
 
