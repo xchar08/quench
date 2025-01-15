@@ -227,7 +227,10 @@ const FireStationsMap = () => {
   const truckMarkersRef = useRef([]);
   const [pathPolyline, setPathPolyline] = useState(null);
 
-  // Removed the conflicting useEffect for activeFires
+  // ActiveFires => manually managed
+  useEffect(() => {
+    setActiveFires(fireLocations.length);
+  }, [fireLocations]);
 
   // ============== TF MODEL (dummy) ==============
   useEffect(() => {
@@ -443,11 +446,9 @@ const FireStationsMap = () => {
         const text = await resp.text();
         const fires = csvToJson(text) || [];
         setFireLocations(Array.isArray(fires) ? fires : []);
-        setActiveFires(fires.length); // Initialize activeFires based on fetched fires
       } catch (err) {
         console.error('Error fetching NASA FIRMS data:', err);
         setFireLocations([]);
-        setActiveFires(0); // Initialize activeFires to 0 if fetch fails
       }
     };
     fetchFires();
@@ -641,9 +642,7 @@ const FireStationsMap = () => {
     );
     setExtinguishedCount((prev) => prev + 1);
     setActiveFires((prev) => prev - 1);
-    console.log(`Fire with ID ${fireId} extinguished.`);
   };
-
   const handleFireExtinguish = (fire) => {
     let val = fire.bright_ti4 || 0;
     if (val > 330) val -= 200;
@@ -658,7 +657,6 @@ const FireStationsMap = () => {
       // force re-render => update heatmap
       setFireLocations((old) => [...old]);
     }
-    console.log(`Fire ID ${fire.id} updated. New brightness: ${val}`);
   };
 
   // Animate truck marker along coords
@@ -684,7 +682,6 @@ const FireStationsMap = () => {
         handleFireExtinguish(fire);
         // Remove the truck
         marker.setMap(null);
-        console.log(`Truck for Fire ID ${fire.id} has completed its mission and is removed.`);
       } else {
         marker.setPosition(pathCoords[idx]);
       }
