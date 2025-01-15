@@ -41,14 +41,14 @@ function createCirclePolygonGeoJson(lat, lng, radiusKm = 10, sides = 36) {
 }
 
 /** 
- * QUIRKY INSURANCE CHATBOT (Ardie) with Nebius AI
+ * QUIRKY INSURANCE CHATBOT (Burnie) with Nebius AI
  */
 function QuirkyInsuranceChatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: "Hello! I'm Ardie, your 2025 CA wildfire insurance & safety chatbot! Ask me about: \n- How to pack a go-bag \n- How to file insurance claims for lost property"
+      content: "Hello! I'm Burnie, your 2025 CA wildfire insurance & safety chatbot! Ask me about: \n- How to pack a go-bag \n- How to file insurance claims for lost property"
     }
   ]);
   const [userInput, setUserInput] = useState('');
@@ -80,7 +80,7 @@ function QuirkyInsuranceChatbot() {
           {
             role: 'system',
             content:
-              'You are Ardie, a quirky 2025 CA wildfire insurance & safety chatbot with puns & disclaimers.'
+              'You are Burnie, a quirky 2025 CA wildfire insurance & safety chatbot with puns & disclaimers.'
           },
           {
             role: 'user',
@@ -94,7 +94,7 @@ function QuirkyInsuranceChatbot() {
       console.error('Nebius AI error:', err);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: 'Ardie had trouble connecting to Nebius. Sorry!' }
+        { role: 'assistant', content: 'Burnie had trouble connecting to Nebius. Sorry!' }
       ]);
     }
   };
@@ -106,7 +106,7 @@ function QuirkyInsuranceChatbot() {
           onClick={() => setIsOpen(true)}
           className="bg-orange-500 hover:bg-orange-600 text-white rounded-md px-4 py-2 font-bold shadow-lg transition-colors"
         >
-          Chat with Ardie
+          Chat with Burnie
         </button>
       )}
 
@@ -116,10 +116,10 @@ function QuirkyInsuranceChatbot() {
           <div className="bg-gradient-to-r from-orange-400 to-orange-600 text-white px-4 py-3 flex items-center relative">
             <img
               src={chatbotImages[botImageIndex]}
-              alt="Ardie"
+              alt="Burnie"
               className="w-8 h-8 rounded-full mr-2"
             />
-            <div className="font-bold text-sm">Ardie - Wildfire Chat</div>
+            <div className="font-bold text-sm">Burnie - Wildfire Chat</div>
             <button
               onClick={() => setIsOpen(false)}
               className="absolute right-3 top-2 text-white text-xl leading-none"
@@ -131,21 +131,21 @@ function QuirkyInsuranceChatbot() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto bg-gray-50 p-2">
             {messages.map((msg, i) => {
-              const isArdie = msg.role === 'assistant' || msg.role === 'system';
+              const isBurnie = msg.role === 'assistant' || msg.role === 'system';
               return (
                 <div
                   key={i}
                   className={`my-2 flex flex-col ${
-                    isArdie ? 'items-start' : 'items-end'
+                    isBurnie ? 'items-start' : 'items-end'
                   }`}
                 >
                   <div
                     className={`max-w-[70%] px-3 py-2 rounded-lg shadow text-sm ${
-                      isArdie ? 'bg-orange-100 text-orange-900' : 'bg-gray-200 text-gray-800'
+                      isBurnie ? 'bg-orange-100 text-orange-900' : 'bg-gray-200 text-gray-800'
                     }`}
                   >
                     <span className="font-semibold block mb-1">
-                      {isArdie ? 'Ardie' : 'You'}
+                      {isBurnie ? 'Burnie' : 'You'}
                     </span>
                     <span className="whitespace-pre-line break-words">{msg.content}</span>
                   </div>
