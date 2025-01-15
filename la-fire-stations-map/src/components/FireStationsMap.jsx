@@ -2,12 +2,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
+// Removed the faulty import for AdvancedMarkerElement
 
 const FireStationsMap = () => {
   const [fireStations, setFireStations] = useState([]);
+  const [shelters, setShelters] = useState([]);
   const [loading, setLoading] = useState(true);
   const mapRef = useRef(null); // Reference to the map div
   const mapInstanceRef = useRef(null); // Reference to the map instance
+  const fireMarkersRef = useRef([]);
+  const shelterMarkersRef = useRef([]);
 
   // Retrieve API key and Map ID from environment variables
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -25,6 +29,21 @@ const FireStationsMap = () => {
     };
 
     fetchFireStations();
+  }, []);
+
+  // Fetch Shelters Data
+  useEffect(() => {
+    const fetchShelters = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/shelters'); // Update with your backend URL
+        console.log('Fetched shelters data:', response.data); // Debugging log
+        setShelters(response.data);
+      } catch (error) {
+        console.error('Error fetching shelters data:', error);
+      }
+    };
+
+    fetchShelters();
   }, []);
 
   // Initialize Google Maps
@@ -68,9 +87,24 @@ const FireStationsMap = () => {
     };
   }, [googleMapsApiKey, mapId]);
 
-  // Add Markers to the Map
+  // Helper function to create custom marker content
+  const createMarkerContent = (color) => {
+    const div = document.createElement('div');
+    div.style.backgroundColor = color;
+    div.style.width = '16px';
+    div.style.height = '16px';
+    div.style.borderRadius = '50%';
+    div.style.border = '2px solid white';
+    return div;
+  };
+
+  // Add Fire Station Markers to the Map
   useEffect(() => {
     if (mapInstanceRef.current && fireStations.length > 0) {
+      // Clear existing fire markers
+      fireMarkersRef.current.forEach((marker) => marker.setMap(null));
+      fireMarkersRef.current = [];
+
       fireStations.forEach((station) => {
         const { the_geom, shp_addr, address } = station;
         if (!the_geom || !the_geom.coordinates) return;
@@ -79,14 +113,19 @@ const FireStationsMap = () => {
         const latNum = parseFloat(lat);
         const lngNum = parseFloat(lng);
 
-        const marker = new window.google.maps.marker.AdvancedMarkerElement({
-          position: { lat: latNum, lng: lngNum },
+        // Create custom marker content
+        const markerElement = createMarkerContent('red');
+
+        // Instantiate AdvancedMarkerElement
+        const marker = new google.maps.marker.AdvancedMarkerElement({
           map: mapInstanceRef.current,
+          position: { lat: latNum, lng: lngNum },
           title: shp_addr,
+          content: markerElement,
         });
 
-        // Create an InfoWindow
-        const infoWindow = new window.google.maps.InfoWindow({
+        // Create an InfoWindow for Fire Station
+        const infoWindow = new google.maps.InfoWindow({
           content: `
             <div style="padding: 10px; font-family: Arial, sans-serif;">
               <h2 style="font-size: 16px; font-weight: bold;">${shp_addr}</h2>
@@ -95,13 +134,70 @@ const FireStationsMap = () => {
           `,
         });
 
-        // Add click listener to marker to open InfoWindow
-        marker.addListener('click', () => {
+        // Add click listener using google.maps.event.addListener
+        google.maps.event.addListener(marker, 'click', () => {
           infoWindow.open(mapInstanceRef.current, marker);
         });
+
+        // Store marker reference
+        fireMarkersRef.current.push(marker);
       });
     }
   }, [mapInstanceRef.current, fireStations]);
+
+  // Add Shelter Markers to the Map
+  useEffect(() => {
+    if (mapInstanceRef.current && shelters.length > 0) {
+      // Clear existing shelter markers
+      shelterMarkersRef.current.forEach((marker) => marker.setMap(null));
+      shelterMarkersRef.current = [];
+
+      shelters.forEach((shelter) => {
+        const { latitude, longitude, name, streetAddress, city, state, zip } = shelter;
+        if (!latitude || !longitude) {
+          console.warn('Shelter missing coordinates:', shelter);
+          return;
+        }
+
+        const latNum = parseFloat(latitude);
+        const lngNum = parseFloat(longitude);
+
+        if (isNaN(latNum) || isNaN(lngNum)) {
+          console.warn('Invalid coordinates for shelter:', shelter);
+          return;
+        }
+
+        // Create custom marker content
+        const markerElement = createMarkerContent('blue');
+
+        // Instantiate AdvancedMarkerElement
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+          map: mapInstanceRef.current,
+          position: { lat: latNum, lng: lngNum },
+          title: name,
+          content: markerElement,
+        });
+
+        // Create an InfoWindow for Shelter
+        const infoWindow = new google.maps.InfoWindow({
+          content: `
+            <div style="padding: 10px; font-family: Arial, sans-serif;">
+              <h2 style="font-size: 16px; font-weight: bold;">${name}</h2>
+              <p>${streetAddress}, ${city}, ${state} ${zip}</p>
+            </div>
+          `,
+        });
+
+        // Add click listener using google.maps.event.addListener
+        google.maps.event.addListener(marker, 'click', () => {
+          infoWindow.open(mapInstanceRef.current, marker);
+        });
+
+        // Store marker reference
+        shelterMarkersRef.current.push(marker);
+      });
+    }
+  }, [mapInstanceRef.current, shelters]);
 
   return (
     <div className="relative">
