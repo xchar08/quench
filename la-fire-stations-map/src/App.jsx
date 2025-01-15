@@ -3,6 +3,7 @@ import React from 'react';
 import { BrowserRouter as Router, Route, Routes, Link } from 'react-router-dom';
 import FireStationsMap from './components/FireStationsMap';
 import ErrorBoundary from './ErrorBoundary';
+import LandingPage from './components/LandingPage';
 
 function App() {
   return (
@@ -23,7 +24,7 @@ function App() {
             </ul>
           </nav>
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<LandingPage />} />
             <Route path="/map" element={<FireStationsMap />} />
             <Route path="/about" element={<About />} />
           </Routes>
@@ -31,10 +32,6 @@ function App() {
       </ErrorBoundary>
     </Router>
   );
-}
-
-function Home() {
-  return <div className="p-4">Welcome to Project Quench</div>;
 }
 
 function About() {
