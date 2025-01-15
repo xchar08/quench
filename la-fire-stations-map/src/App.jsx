@@ -1,13 +1,15 @@
 // src/App.jsx
 import React from 'react';
+import { FireCountProvider } from './contexts/FireCountContext';
 import FireStationsMap from './components/FireStationsMap';
-import ErrorBoundary from './ErrorBoundary';
+// Import other components like Leaderboard here
 
 function App() {
   return (
-    <ErrorBoundary>
+    <FireCountProvider>
       <FireStationsMap />
-    </ErrorBoundary>
+      {/* Include other components that need access to fire counts, e.g., <Leaderboard /> */}
+    </FireCountProvider>
   );
 }
 
