@@ -227,7 +227,7 @@ const FireStationsMap = () => {
   const truckMarkersRef = useRef([]);
   const [pathPolyline, setPathPolyline] = useState(null);
 
-  // ActiveFires => length of fireLocations
+  // ActiveFires => manually managed
   useEffect(() => {
     setActiveFires(fireLocations.length);
   }, [fireLocations]);
@@ -397,7 +397,7 @@ const FireStationsMap = () => {
                 });
                 alertsRef.current.push(polygon);
 
-                // spinning cat
+                // Spinning cat marker
                 const centroid = getPolygonCentroid(coords);
                 const catMarker = new window.google.maps.Marker({
                   position: centroid,
@@ -430,7 +430,8 @@ const FireStationsMap = () => {
       skipEmptyLines: true,
       dynamicTyping: true,
     });
-    return parsed.data.map((fire) => ({
+    return parsed.data.map((fire, index) => ({
+      id: index, // Assign a unique ID to each fire
       latitude: parseFloat(fire.latitude),
       longitude: parseFloat(fire.longitude),
       bright_ti4: parseFloat(fire.bright_ti4),
@@ -528,7 +529,6 @@ const FireStationsMap = () => {
         title: shp_addr || 'Fire Station',
         map: showFireStations ? map : null, // Set map based on showFireStations
       });
-      if (showFireStations) marker.setMap(map);
 
       const infoWindow = new window.google.maps.InfoWindow({
         content: `<div><h2>${shp_addr}</h2><p>${address}</p></div>`,
@@ -559,7 +559,6 @@ const FireStationsMap = () => {
         title: name || 'Shelter',
         map: showShelters ? map : null, // Set map based on showShelters
       });
-      if (showShelters) marker.setMap(map);
 
       const infoWindow = new window.google.maps.InfoWindow({
         content: `<div>
@@ -591,8 +590,6 @@ const FireStationsMap = () => {
         title: hyd.sizeCode || 'Hydrant',
         map: showHydrants ? map : null, // Set map based on showHydrants
       });
-      if (showHydrants) marker.setMap(map);
-
       hydrantMarkersRef.current.push(marker);
     });
   }, [map, hydrants, showHydrants]);
@@ -639,11 +636,12 @@ const FireStationsMap = () => {
   }, [map, showAlerts]);
 
   // Fire Extinguish
-  const removeFire = (fire) => {
+  const removeFire = (fireId) => {
     setFireLocations((old) =>
-      old.filter((f) => f.latitude !== fire.latitude || f.longitude !== fire.longitude)
+      old.filter((f) => f.id !== fireId)
     );
-    setExtinguishedCount((old) => old + 1);
+    setExtinguishedCount((prev) => prev + 1);
+    setActiveFires((prev) => prev - 1);
   };
   const handleFireExtinguish = (fire) => {
     let val = fire.bright_ti4 || 0;
@@ -654,7 +652,7 @@ const FireStationsMap = () => {
     fire.bright_ti4 = val;
 
     if (val < 50) {
-      removeFire(fire);
+      removeFire(fire.id);
     } else {
       // force re-render => update heatmap
       setFireLocations((old) => [...old]);
