@@ -3,13 +3,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Loader } from '@googlemaps/js-api-loader';
 import Papa from 'papaparse';
-import * as tf from '@tensorflow/tfjs'; // TensorFlow.js
-import OpenAI from 'openai'; // Nebius AI client
+import * as tf from '@tensorflow/tfjs';
+import OpenAI from 'openai'; 
 
 const FireStationsMap = () => {
   // States and refs
   const [fireStations, setFireStations] = useState([]);
   const [shelters, setShelters] = useState([]);
+  const [hydrants, setHydrants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [map, setMap] = useState(null);
   const [fireLocations, setFireLocations] = useState([]);
@@ -19,6 +20,7 @@ const FireStationsMap = () => {
   const fireMarkersRef = useRef([]);
   const shelterMarkersRef = useRef([]);
   const heatmapRef = useRef(null);
+  const hydrantMarkersRef = useRef([]);
   const geocoderRef = useRef(null);
 
   // API Keys from environment variables
@@ -91,6 +93,36 @@ const FireStationsMap = () => {
       }
     };
     fetchFireData();
+  }, []);
+
+  useEffect(() => {
+    const fetchHydrants = async () => {
+      try {
+        // The file is in public/data/Hydrants.json
+        // So we can fetch it from /data/Hydrants.json
+        const response = await fetch('/data/Hydrants.json');
+        const jsonData = await response.json();
+
+        // The hydrant geometry is in jsonData.features[i].geometry.x, .y
+        if (jsonData && jsonData.features) {
+          const hydrantArr = jsonData.features.map((feat) => ({
+            objectId: feat.attributes?.OBJECTID,
+            sizeCode: feat.attributes?.SIZE_CODE,
+            makeDesc: feat.attributes?.MAKE_DESCRIPTION,
+            mainSize: feat.attributes?.MAIN_SIZE,
+            tooltip: feat.attributes?.TOOLTIP,
+            url: feat.attributes?.NLA_URL,
+            // geometry
+            latitude: feat.geometry?.y,
+            longitude: feat.geometry?.x,
+          }));
+          setHydrants(hydrantArr);
+        }
+      } catch (error) {
+        console.error('Error fetching hydrants data:', error);
+      }
+    };
+    fetchHydrants();
   }, []);
 
   // Train a dummy TensorFlow.js model (placeholder)
@@ -219,6 +251,56 @@ const FireStationsMap = () => {
       });
     }
   }, [map, shelters]);
+
+
+   // ----------------------------------------------------------------
+  // 10) Markers: Hydrants (green)
+  // ----------------------------------------------------------------
+  useEffect(() => {
+    if (map && hydrants.length > 0 && window.google) {
+      // Clear existing hydrant markers
+      hydrantMarkersRef.current.forEach((marker) => marker.setMap(null));
+      hydrantMarkersRef.current = [];
+
+      hydrants.forEach((hydrant) => {
+        if (!hydrant.latitude || !hydrant.longitude) return;
+        const latNum = parseFloat(hydrant.latitude);
+        const lngNum = parseFloat(hydrant.longitude);
+        if (isNaN(latNum) || isNaN(lngNum)) return;
+
+        const markerElement = createMarkerContent('green');
+
+        const marker = new window.google.maps.marker.AdvancedMarkerElement({
+          map,
+          position: { lat: latNum, lng: lngNum },
+          title: hydrant.sizeCode || 'Hydrant',
+          content: markerElement,
+        });
+
+        // InfoWindow
+        const infoHtml = `
+          <div style="padding: 10px;">
+            <h2>Hydrant #${hydrant.objectId || ''}</h2>
+            <p>Size Code: ${hydrant.sizeCode || ''}</p>
+            <p>Make: ${hydrant.makeDesc || ''}</p>
+            <p>Main Size: ${hydrant.mainSize || ''}</p>
+            <p>${hydrant.tooltip || ''}</p>
+            <a href="${hydrant.url || '#'}" target="_blank" rel="noopener noreferrer">Details</a>
+          </div>
+        `;
+        const infoWindow = new window.google.maps.InfoWindow({
+          content: infoHtml,
+        });
+
+        window.google.maps.event.addListener(marker, 'click', () => {
+          infoWindow.open(map, marker);
+        });
+
+        hydrantMarkersRef.current.push(marker);
+      });
+    }
+  }, [map, hydrants]);
+
 
   // Create heatmap for fires
   useEffect(() => {
@@ -531,11 +613,34 @@ Provide assignments in JSON format.`;
           <div className="text-xl font-semibold">Loading Map...</div>
         </div>
       )}
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 5, background: 'white', padding: '10px', borderRadius: '5px', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
-        <input id="address-input" type="text" placeholder="Enter your address" style={{ width: '250px', padding: '5px' }} />
-        <button onClick={handleSearch} style={{ marginLeft: '10px', padding: '5px 10px' }}>Find Nearest Shelter</button>
-        <button onClick={simulateTruckDeployment} style={{ marginLeft: '10px', padding: '5px 10px' }}>Deploy Trucks</button>
+
+      {/* Basic UI for searching an address, etc. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          zIndex: 5,
+          background: 'white',
+          padding: '10px',
+          borderRadius: '5px',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+        }}
+      >
+        <input
+          id="address-input"
+          type="text"
+          placeholder="Enter your address"
+          style={{ width: '250px', padding: '5px' }}
+        />
+        <button onClick={handleSearch} style={{ marginLeft: '10px', padding: '5px 10px' }}>
+          Find Nearest Shelter
+        </button>
+        <button onClick={simulateTruckDeployment} style={{ marginLeft: '10px', padding: '5px 10px' }}>
+          Deploy Trucks
+        </button>
       </div>
+
       <div id="map" style={{ width: '100%', height: '100vh' }}></div>
     </div>
   );
