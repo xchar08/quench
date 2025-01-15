@@ -9,12 +9,13 @@ function BackgroundParticles() {
       {particles.map((_, index) => (
         <div
           key={index}
-          className="absolute text-4xl opacity-10 animate-float"
+          className="absolute text-4xl opacity-0 animate-fire"
           style={{
             left: `${Math.random() * 100}%`,
             top: `${Math.random() * 100}%`,
-            animationDuration: `${Math.random() * 10 + 10}s`,
+            animationDuration: `${Math.random() * 5 + 5}s`,
             animationDelay: `${Math.random() * 5}s`,
+            transform: `scale(${Math.random() * 0.5 + 0.5})`,
           }}
         >
           🔥

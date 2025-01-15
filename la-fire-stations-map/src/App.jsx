@@ -2,24 +2,25 @@
 import React from 'react';
 import { BrowserRouter as Router, Route, Routes, Link } from 'react-router-dom';
 import FireStationsMap from './components/FireStationsMap';
-import ErrorBoundary from './ErrorBoundary';
 import LandingPage from './components/LandingPage';
+import About from './components/About'; // Import the new About component
+import ErrorBoundary from './ErrorBoundary';
 
 function App() {
   return (
     <Router>
       <ErrorBoundary>
         <div className="flex flex-col h-screen">
-          <nav className="bg-orange-500 p-4">
+          <nav className="bg-[#a6004d] p-4">
             <ul className="flex space-x-4">
               <li>
-                <Link to="/" className="text-white hover:text-orange-200">Home</Link>
+                <Link to="/" className="text-white hover:text-pink-200">Home</Link>
               </li>
               <li>
-                <Link to="/map" className="text-white hover:text-orange-200">Fire Map</Link>
+                <Link to="/map" className="text-white hover:text-pink-200">Fire Map</Link>
               </li>
               <li>
-                <Link to="/about" className="text-white hover:text-orange-200">About</Link>
+                <Link to="/about" className="text-white hover:text-pink-200">About</Link>
               </li>
             </ul>
           </nav>
@@ -32,10 +33,6 @@ function App() {
       </ErrorBoundary>
     </Router>
   );
-}
-
-function About() {
-  return <div className="p-4">About Project Quench</div>;
 }
 
 export default App;

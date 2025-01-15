@@ -749,7 +749,7 @@ const FireStationsMap = () => {
   // Animate truck marker along coords
   const animateTruckSprite = (pathCoords, fire) => {
     if (!map || !window.google || !pathCoords.length) return;
-
+  
     const marker = new window.google.maps.Marker({
       position: pathCoords[0],
       map,
@@ -759,7 +759,7 @@ const FireStationsMap = () => {
       },
     });
     truckMarkersRef.current.push(marker);
-
+  
     let idx = 0;
     const interval = setInterval(() => {
       idx++;
@@ -769,11 +769,15 @@ const FireStationsMap = () => {
         handleFireExtinguish(fire);
         // Remove the truck
         marker.setMap(null);
+        // Update the leaderboard
+        setActiveFires(prevActiveFires => prevActiveFires - 1);
+        setExtinguishedCount(prevCount => prevCount + 1);
       } else {
         marker.setPosition(pathCoords[idx]);
       }
     }, 100);
   };
+  
 
   // Our server proxy => calls /api/graphhopper-route
   const postRouteToServer = async (bodyData) => {
