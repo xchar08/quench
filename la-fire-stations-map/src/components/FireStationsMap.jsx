@@ -5,6 +5,7 @@ import { Loader } from '@googlemaps/js-api-loader';
 import Papa from 'papaparse';
 import * as tf from '@tensorflow/tfjs';
 import OpenAI from 'openai'; 
+import hydrantpng from '../assets/firehydrant.png';
 
 const FireStationsMap = () => {
   // States and refs
@@ -386,54 +387,53 @@ const FireStationsMap = () => {
   }, [map, shelters]);
 
 
-   // ----------------------------------------------------------------
-  // 10) Markers: Hydrants (green)
-  // ----------------------------------------------------------------
-  useEffect(() => {
-    if (map && hydrants.length > 0 && window.google) {
-      // Clear existing hydrant markers
-      hydrantMarkersRef.current.forEach((marker) => marker.setMap(null));
-      hydrantMarkersRef.current = [];
+// Add Hydrant markers (custom firehydrant.png)
+useEffect(() => {
+  if (map && hydrants.length > 0 && window.google) {
+    // Clear existing hydrant markers
+    hydrantMarkersRef.current.forEach((marker) => marker.setMap(null));
+    hydrantMarkersRef.current = [];
 
-      hydrants.forEach((hydrant) => {
-        if (!hydrant.latitude || !hydrant.longitude) return;
-        const latNum = parseFloat(hydrant.latitude);
-        const lngNum = parseFloat(hydrant.longitude);
-        if (isNaN(latNum) || isNaN(lngNum)) return;
+    hydrants.forEach((hydrant) => {
+      if (!hydrant.latitude || !hydrant.longitude) return;
+      const latNum = parseFloat(hydrant.latitude);
+      const lngNum = parseFloat(hydrant.longitude);
+      if (isNaN(latNum) || isNaN(lngNum)) return;
 
-        const markerElement = createMarkerContent('green');
-
-        const marker = new window.google.maps.marker.AdvancedMarkerElement({
-          map,
-          position: { lat: latNum, lng: lngNum },
-          title: hydrant.sizeCode || 'Hydrant',
-          content: markerElement,
-        });
-
-        // InfoWindow
-        const infoHtml = `
-          <div style="padding: 10px;">
-            <h2>Hydrant #${hydrant.objectId || ''}</h2>
-            <p>Size Code: ${hydrant.sizeCode || ''}</p>
-            <p>Make: ${hydrant.makeDesc || ''}</p>
-            <p>Main Size: ${hydrant.mainSize || ''}</p>
-            <p>${hydrant.tooltip || ''}</p>
-            <a href="${hydrant.url || '#'}" target="_blank" rel="noopener noreferrer">Details</a>
-          </div>
-        `;
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: infoHtml,
-        });
-
-        window.google.maps.event.addListener(marker, 'click', () => {
-          infoWindow.open(map, marker);
-        });
-
-        hydrantMarkersRef.current.push(marker);
+      // Use custom icon for hydrants
+      const marker = new window.google.maps.Marker({
+        map,
+        position: { lat: latNum, lng: lngNum },
+        icon: {
+          url: hydrantpng, 
+          scaledSize: new window.google.maps.Size(8, 10), // Scale the icon to 32x32
+        },
+        title: hydrant.sizeCode || 'Hydrant',
       });
-    }
-  }, [map, hydrants]);
 
+      // InfoWindow
+      const infoHtml = `
+        <div style="padding: 10px;">
+          <h2>Hydrant #${hydrant.objectId || ''}</h2>
+          <p>Size Code: ${hydrant.sizeCode || ''}</p>
+          <p>Make: ${hydrant.makeDesc || ''}</p>
+          <p>Main Size: ${hydrant.mainSize || ''}</p>
+          <p>${hydrant.tooltip || ''}</p>
+          <a href="${hydrant.url || '#'}" target="_blank" rel="noopener noreferrer">Details</a>
+        </div>
+      `;
+      const infoWindow = new window.google.maps.InfoWindow({
+        content: infoHtml,
+      });
+
+      window.google.maps.event.addListener(marker, 'click', () => {
+        infoWindow.open(map, marker);
+      });
+
+      hydrantMarkersRef.current.push(marker);
+    });
+  }
+}, [map, hydrants]);
 
   // Create heatmap for fires
   useEffect(() => {
